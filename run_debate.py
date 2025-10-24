@@ -93,7 +93,15 @@ def parse_choices(sample: Dict[str, str]) -> Tuple[str, List[Choice], str]:
     elif isinstance(answer, str) and answer.strip() in labels[: len(options)]:
         answer_label = answer.strip()
     elif "answer_idx" in sample:
-        answer_label = labels[int(sample["answer_idx"])]
+        idx_value = sample["answer_idx"]
+        if isinstance(idx_value, int):
+            answer_label = labels[idx_value]
+        elif isinstance(idx_value, str):
+            idx_str = idx_value.strip()
+            if idx_str.isdigit():
+                answer_label = labels[int(idx_str)]
+            elif len(idx_str) == 1 and idx_str.upper() in labels[: len(options)]:
+                answer_label = idx_str.upper()
     else:
         # If the dataset stores textual answer, try to map back to a label.
         answer_label = None
