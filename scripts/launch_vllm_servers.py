@@ -28,6 +28,18 @@ import sys
 from typing import Dict, List
 
 
+def _assert_python_version() -> None:
+    if sys.version_info < (3, 10):
+        raise SystemExit(
+            "Python 3.10 or newer is required to run vLLM. "
+            "Detected {}.{}.{}".format(
+                sys.version_info.major,
+                sys.version_info.minor,
+                sys.version_info.micro,
+            )
+        )
+
+
 def build_server_command(model: str, port: int, extra_args: List[str] | None = None) -> List[str]:
     """Build the command list for starting a vLLM OpenAI server."""
 
@@ -60,6 +72,7 @@ def launch_server(command: List[str], cuda_visible_devices: str) -> subprocess.P
 
 
 def main() -> None:
+    _assert_python_version()
     parser = argparse.ArgumentParser(description="Launch two vLLM servers on dedicated GPUs.")
     parser.add_argument("--llama-model", default="meta-llama/Meta-Llama-3.1-8B-Instruct",
                         help="HF repo or local path for the general-purpose Llama model.")

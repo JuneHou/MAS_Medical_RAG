@@ -9,7 +9,7 @@ while both are served through [vLLM](https://github.com/vllm-project/vllm).
 
 ## Requirements
 
-* Python 3.10+
+* Python 3.10+ (earlier versions will crash when importing `vllm`)
 * CUDA-enabled GPUs with sufficient memory to host the models (e.g. two A100s)
 * Access to the Hugging Face model and dataset repositories (requires `huggingface_hub`
 authentication for gated models, if applicable)
