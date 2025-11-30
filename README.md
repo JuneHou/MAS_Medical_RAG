@@ -1,105 +1,167 @@
-# Multi-Agent Medical Debate Playground
+# Multi-Agent Medical Debate System
 
-This repository provides an experiment harness for comparing two similar-sized
-language models on the [MedQA](https://huggingface.co/datasets/medalpaca/medqa)
-benchmark using a debate protocol.  It is designed to pit a general-purpose
-Llama 3.1 8B assistant against the medical-focused
-[`chaoyi-wu/PMC_LLAMA_7B`](https://huggingface.co/chaoyi-wu/PMC_LLAMA_7B) model
-while both are served through [vLLM](https://github.com/vllm-project/vllm).
+A sophisticated multi-agent debate system for medical question answering and mortality prediction, integrating retrieval-augmented generation (RAG) with structured clinical reasoning.
 
-## Requirements
+## Overview
 
-* Python 3.10+ (earlier versions will crash when importing `vllm`)
-* CUDA-enabled GPUs with sufficient memory to host the models (e.g. two A100s)
-* Access to the Hugging Face model and dataset repositories (requires `huggingface_hub`
-authentication for gated models, if applicable)
+This project implements two main debate architectures:
 
-Install the Python dependencies into a virtual environment:
+1. **Medical QA Debate System**: Multi-agent debate for medical question answering using MedRAG retrieval
+2. **KARE Mortality Prediction**: Multi-agent debate system for clinical mortality prediction with EHR data
+
+## Key Features
+
+- **Multi-Agent Architecture**: Specialized agents with distinct roles and reasoning patterns
+- **RAG Integration**: Medical document retrieval using MedRAG and MedCPT
+- **Conservative Prediction Framework**: Designed to reduce over-prediction bias in clinical settings
+- **Structured Debate Rounds**: Systematic evidence gathering and integration process
+- **Comprehensive Logging**: Detailed tracking of agent decisions and probability estimates
+
+## Project Structure
+
+```
+├── KARE/                           # KARE mortality prediction system
+│   ├── mortality_debate_rag.py     # Main debate system implementation
+│   ├── kare_data_adapter.py       # Data loading and formatting
+│   ├── run_kare_debate_mortality.py # Execution script
+│   └── ...
+├── analyze_debate.py              # Analysis tools
+├── run_debate_medrag_rag.py       # Medical QA debate system
+└── ...
+```
+
+## Installation
+
+1. **Clone the repository**:
+```bash
+git clone https://github.com/[your-username]/multi-agent-medical-debate.git
+cd multi-agent-medical-debate
+```
+
+2. **Set up conda environment**:
+```bash
+conda create -n medrag python=3.9
+conda activate medrag
+```
+
+3. **Install dependencies**:
+```bash
+pip install torch transformers vllm
+pip install faiss-cpu  # or faiss-gpu for GPU support
+pip install sentence-transformers
+pip install datasets tqdm wandb
+```
+
+4. **Install MedRAG** (follow MedRAG installation instructions):
+```bash
+# Install MedRAG from source
+git clone https://github.com/Teddy-XiongGZ/MedRAG.git
+cd MedRAG
+pip install -e .
+```
+
+## Usage
+
+### KARE Mortality Prediction
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+python KARE/run_kare_debate_mortality.py \
+    --model_name "meta-llama/Meta-Llama-3.1-8B-Instruct" \
+    --integrator_model "meta-llama/Meta-Llama-3.1-70B-Instruct" \
+    --dataset_path "path/to/kare/data" \
+    --output_dir "results/kare_debate" \
+    --num_samples 100
 ```
 
-## Launching the vLLM servers
-
-Use the helper script to start two OpenAI-compatible vLLM servers, one per GPU.
-The example below binds the Llama 3.1 8B model to GPU `3` on port `8000` and the
-PMC-LLaMA model to GPU `4` on port `8001`.
+### Medical QA Debate
 
 ```bash
-python scripts/launch_vllm_servers.py \
-  --llama-model meta-llama/Meta-Llama-3.1-8B-Instruct \
-  --llama-gpu 3 --llama-port 8000 \
-  --pmc-model chaoyi-wu/PMC_LLAMA_7B \
-  --pmc-gpu 4 --pmc-port 8001
+python run_debate_medrag_rag.py \
+    --model_name "meta-llama/Meta-Llama-3.1-8B-Instruct" \
+    --dataset_name "medqa" \
+    --output_dir "results/medqa_debate" \
+    --num_samples 50
 ```
 
-The script keeps running and streams logs for both servers.  Press `Ctrl+C` when
-you want to shut everything down.
+## System Architecture
 
-### Manual launch
+### KARE Multi-Agent Debate
 
-If you prefer to start the servers yourself, the following commands are
-sufficient:
+The KARE system uses a 4-agent architecture for mortality prediction:
 
-```bash
-CUDA_VISIBLE_DEVICES=3 OPENAI_API_KEY=dummy \
-python -m vllm.entrypoints.openai.api_server \
-  --model meta-llama/Meta-Llama-3.1-8B-Instruct --port 8000
+1. **Target Patient Analyst**: Comprehensive patient assessment with risk/protective factor analysis
+2. **Mortality Risk Assessor**: Identifies factors that increase mortality risk
+3. **Protective Factor Analyst**: Identifies factors that support survival
+4. **Balanced Clinical Integrator**: Makes final conservative prediction using all evidence
 
-CUDA_VISIBLE_DEVICES=4 OPENAI_API_KEY=dummy \
-python -m vllm.entrypoints.openai.api_server \
-  --model chaoyi-wu/PMC_LLAMA_7B --port 8001
+### Conservative Prediction Framework
+
+The system implements KARE's conservative approach:
+- Only predict mortality when evidence strongly indicates death is very likely
+- When uncertain, err toward survival prediction
+- Integrate both risk factors and protective factors in decision making
+
+## Configuration
+
+Key configuration options:
+
+- **Model Selection**: Support for different LLaMA models and sizes
+- **Temperature Settings**: Agent-specific temperature for response diversity
+- **Token Limits**: Role-based token allocation for comprehensive reasoning
+- **RAG Parameters**: Retrieval corpus selection and similarity thresholds
+
+## Evaluation Metrics
+
+The system tracks comprehensive metrics:
+- **Accuracy, Precision, Recall, F1-score**
+- **Probability Estimates**: Mortality and survival probabilities
+- **Confidence Levels**: Agent confidence in predictions
+- **Debate Quality**: Inter-agent agreement and reasoning quality
+
+## Data Requirements
+
+### KARE Dataset
+- Patient EHR contexts with mortality labels
+- Similar patient examples (positive/negative)
+- Medical knowledge retrieval corpus
+
+### Medical QA Dataset
+- Question-answer pairs from medical exams
+- MedRAG retrieval corpus (MedCorp, PubMed, etc.)
+
+**Note**: Data files are excluded from this repository. Set up your own data following the format specifications in the documentation.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Citation
+
+If you use this code in your research, please cite:
+
+```bibtex
+@article{your_paper,
+    title={Multi-Agent Medical Debate System for Clinical Decision Making},
+    author={Your Name},
+    journal={Your Journal},
+    year={2025}
+}
 ```
 
-## Running the debate evaluation
+## Acknowledgments
 
-Once the servers are up, run the experiment script.  It will download the
-MedQA dataset via the 🤗 `datasets` library, orchestrate the debate, and emit the
-transcripts plus basic accuracy metrics.
+- [MedRAG](https://github.com/Teddy-XiongGZ/MedRAG) for medical document retrieval
+- [KARE](https://github.com/xxx/KARE) for the mortality prediction framework
+- [vLLM](https://github.com/vllm-project/vllm) for efficient LLM inference
 
-```bash
-# Optionally export a shared API key for the OpenAI-compatible endpoints.
-export OPENAI_API_KEY=debate-key
+## Contact
 
-python run_debate.py \
-  --llama-url http://localhost:8000 \
-  --pmc-url http://localhost:8001 \
-  --medqa-split validation \
-  --num-samples 20 \
-  --rounds 3 \
-  --output outputs/medqa_debate.jsonl
-```
-
-This command writes two files:
-
-* `outputs/medqa_debate.jsonl`: a JSONL file containing the full conversation
-  history for each question.
-* `outputs/medqa_debate.metrics.json`: aggregate accuracy statistics derived
-  from the final answers of both agents.
-
-Adjust `--num-samples` for larger evaluations.  The debate loop currently runs a
-fixed sequence of alternating rebuttals beginning with the generalist model.
-
-## Repository layout
-
-```
-.
-├── README.md                # You are here
-├── requirements.txt         # Python dependencies
-├── run_debate.py            # Debate orchestration script
-└── scripts/
-    └── launch_vllm_servers.py  # Helper to start both vLLM servers
-```
-
-## Notes
-
-* Ensure you have the necessary Hugging Face credentials cached locally before
-  launching vLLM, especially for Llama 3.1 weights.
-* The debate script uses simple regex heuristics to extract the final answer
-  letter (A/B/C/...).  Inspect the transcripts if the metrics look suspicious.
-* Feel free to extend the conversation policy or add a final judge model for
-  more elaborate debate schemes.
+For questions or collaboration, please contact [your-email@domain.com]

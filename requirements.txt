@@ -1,5 +1,28 @@
-# Python >=3.10 is required because vLLM uses typing features unavailable on 3.9.
-vllm>=0.4.2
-requests>=2.31.0
-datasets>=2.16.0
-tqdm>=4.66.0
+# Core ML/AI dependencies
+torch>=2.0.0
+transformers>=4.30.0
+vllm>=0.2.0
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.0  # Use faiss-gpu for GPU support
+
+# Data processing
+datasets>=2.10.0
+pandas>=1.5.0
+numpy>=1.24.0
+
+# Utilities
+tqdm>=4.65.0
+wandb>=0.15.0
+pathlib>=1.0.1
+
+# Medical/Scientific
+# Note: Install MedRAG from source following their instructions
+
+# Development/Testing
+pytest>=7.0.0
+black>=23.0.0
+isort>=5.12.0
+
+# Optional: Jupyter for notebooks
+jupyter>=1.0.0
+ipykernel>=6.0.0
