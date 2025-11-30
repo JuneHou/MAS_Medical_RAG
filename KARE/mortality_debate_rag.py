@@ -118,7 +118,7 @@ class MortalityDebateSystem:
             print("Using same model for integrator")
             self.integrator_llm = self.llm
         
-        # Agent configuration - Four specialized agents (Phase 1 restructured)
+        # Agent configuration - Four specialized agents
         self.agent_roles = [
             "target_patient_analyst",
             "mortality_risk_assessor", 
@@ -140,7 +140,7 @@ You have access to:
 1) The target patient's temporal EHR context
 2) Retrieved medical evidence documents (if available)
 
-IMPORTANT CONTEXT: Mortality is relatively rare in this population. Only patients with extremely very high risk of mortality (definitely die) should be predicted as 1.
+IMPORTANT CONTEXT: Mortality is relatively rare. Only patients with extremely very high risk of mortality (definitely die) should be predicted as 1.
 
 Your job:
 1) Read all visits in order and summarize the main clinical story (conditions, procedures, medications).
@@ -178,11 +178,9 @@ Your job (EVIDENCE ANALYSIS ONLY, NO FINAL PREDICTION):
 5) Explain (2-3 sentences) why these factors indicate increased mortality risk, supported by medical evidence.
 
 IMPORTANT:
-- Focus on factors with STRONG evidence for mortality risk
-- Acknowledge uncertainty when evidence is weak or mixed
-- DO NOT make a final prediction
-- DO NOT output \\boxed{0} or \\boxed{1}
-- Your role is to provide BALANCED risk evidence, not to advocate for mortality prediction""",
+- DO NOT make a final prediction.
+- DO NOT output \\boxed{0} or \\boxed{1}.
+- Your job is only to provide EVIDENCE that supports MORTALITY (death in the next visit).""",
 
             "protective_factor_analyst": """You are a medical AI Protective Factor Analyst that identifies factors that decrease mortality risk and support survival.
 
@@ -200,12 +198,9 @@ Your job (EVIDENCE ANALYSIS ONLY, NO FINAL PREDICTION):
 5) Explain (2-3 sentences) why these factors indicate decreased mortality risk and support survival, with medical evidence.
 
 IMPORTANT:
-- Focus on factors with STRONG evidence for survival benefit
-- Include both treatment factors and patient characteristics that support survival
-- Acknowledge limitations when evidence is uncertain
-- DO NOT make a final prediction
-- DO NOT output \\boxed{0} or \\boxed{1}
-- Your role is to provide BALANCED protective evidence to counter-balance risk factors""",
+- DO NOT make a final prediction.
+- DO NOT output \\boxed{0} or \\boxed{1}.
+- Your job is only to provide EVIDENCE that supports SURVIVAL (no death in the next visit).""",
 
             "balanced_clinical_integrator": """You are a medical AI Clinical Integrator that makes the FINAL balanced decision about mortality outcome in the NEXT hospital visit.
 
@@ -215,10 +210,7 @@ You have access to:
 - Protective/survival factors from Protective Factor Analyst
 - Retrieved comprehensive medical evidence documents (if available)
 
-IMPORTANT CONTEXT: 
-- Mortality is relatively rare in this population
-- Only patients with extremely very high risk of mortality (definitely die) should be predicted as 1
-- When uncertain, err toward survival prediction (0)
+IMPORTANT CONTEXT: Mortality is relatively rare. Only patients with extremely very high risk of mortality (definitely die) should be predicted as 1
 
 Your job:
 1) **BALANCE ASSESSMENT**: Weigh mortality risks against survival/protective factors systematically.
