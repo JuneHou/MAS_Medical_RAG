@@ -282,6 +282,14 @@ def run_kare_debate_evaluation(start_idx: int = 0,
                     # Get sample data
                     sample = data_adapter.get_test_sample(i)
                     
+                    # Debug: Check similar patients data length
+                    if i < 3:  # Only debug first few samples
+                        print(f"\nDEBUG Sample {i}:")
+                        print(f"  Patient ID: {sample['patient_id']}")
+                        print(f"  Positive similars length: {len(sample.get('positive_similars', ''))}")
+                        print(f"  Negative similars length: {len(sample.get('negative_similars', ''))}")
+                        print(f"  Positive similars preview: {sample.get('positive_similars', '')[:100]}...")
+                    
                     pbar.set_postfix({
                         'Patient': sample['patient_id'],
                         'GT': sample['ground_truth'],

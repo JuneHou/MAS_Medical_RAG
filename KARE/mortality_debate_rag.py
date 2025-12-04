@@ -93,7 +93,7 @@ class MortalityDebateSystem:
         
         # Initialize main VLLM wrapper for agents 1-3
         os.environ['CUDA_VISIBLE_DEVICES'] = self.main_gpu
-        self.llm = VLLMWrapper(model_name=model_name)
+        self.llm = VLLMWrapper(model_name=model_name)  # VLLMWrapper handles max_model_len internally
         
         # Initialize integrator VLLM wrapper if different model
         if self.integrator_model_name != model_name:
@@ -110,10 +110,12 @@ class MortalityDebateSystem:
             if tensor_parallel_size > 1:
                 self.integrator_llm = VLLMWrapper(
                     model_name=self.integrator_model_name, 
-                    tensor_parallel_size=tensor_parallel_size
+                    tensor_parallel_size=tensor_parallel_size  # VLLMWrapper handles max_model_len internally
                 )
             else:
-                self.integrator_llm = VLLMWrapper(model_name=self.integrator_model_name)
+                self.integrator_llm = VLLMWrapper(
+                    model_name=self.integrator_model_name  # VLLMWrapper handles max_model_len internally
+                )
         else:
             print("Using same model for integrator")
             self.integrator_llm = self.llm
@@ -244,34 +246,35 @@ Do not include anything after the \\boxed{} prediction."""
             try:
                 print(f"[RETRIEVE] Query length: {len(query)} chars")
                 
-                # Use MedRAG's source-specific retrieval method
-                if hasattr(self.medrag, 'medrag_answer_by_source'):
+                # Use MedRAG retrieval system following run_debate_medrag_rag.py pattern
+                if hasattr(self.medrag, 'answer') and self.medrag.corpus_name == "MedCorp2":
+                    # Use the optimized source-specific retrieval for MedCorp2
                     _, retrieved_snippets, scores = self.medrag.medrag_answer_by_source(
-                        question=query,
-                        options=None,
-                        k=k,
-                        rrf_k=100,
+                        question=query, 
+                        options=None, 
+                        k=k, 
+                        rrf_k=60,
                         save_dir=log_dir
                     )
                 else:
-                    # Fallback to standard method
+                    # Use standard MedRAG retrieval
                     _, retrieved_snippets, scores = self.medrag.medrag_answer(
                         question=query,
-                        options=None, 
+                        options=None,
                         k=k,
+                        rrf_k=60,
                         save_dir=log_dir
                     )
                 
-                # Format documents for agent context
+                # Format retrieved documents for tool output following run_debate_medrag_rag.py pattern
                 formatted_docs = []
                 for i, doc in enumerate(retrieved_snippets):
                     formatted_docs.append({
-                        'id': doc.get('id', f'doc_{i+1}'),
-                        'title': doc.get('title', 'Medical Document'),
+                        'id': i + 1,
+                        'title': doc.get('title', 'Unknown'),
                         'content': doc.get('content', ''),
                         'score': scores[i] if i < len(scores) else 0.0,
-                        'source_type': doc.get('source_type', 'unknown'),
-                        'query_used': query[:200] + "..." if len(query) > 200 else query
+                        'source': doc.get('source_type', 'unknown')
                     })
                 
                 # Save retrieved documents to log directory if provided
@@ -302,6 +305,127 @@ Do not include anything after the \\boxed{} prediction."""
                 return []
         
         return {"name": "retrieve", "func": retrieve_tool}
+    
+    def _summarize_round_response(self, round_text: str, round_name: str, target_tokens: int = 4000) -> str:
+        """
+        Summarize individual round response if it exceeds token limits.
+        
+        Args:
+            round_text: Single round response text
+            round_name: Name of the round (e.g., "target_analysis", "risk_assessment", "protective_analysis")
+            target_tokens: Target number of tokens for summary (default 4000 per round)
+            
+        Returns:
+            Summarized round text or original if under limit
+        """
+        # Rough estimate: 1 token ≈ 4 chars, so 6000 tokens ≈ 24000 chars
+        token_limit_chars = 6000 * 4  # 24000 chars
+        
+        if len(round_text) <= token_limit_chars:
+            print(f"[ROUND] {round_name} length {len(round_text)} chars - keeping original (under 6000 token limit)")
+            return round_text
+            
+        print(f"[ROUND] Summarizing {round_name} from {len(round_text)} chars to ~{target_tokens} tokens")
+        
+        # Create round-specific summary prompt
+        if "target" in round_name.lower():
+            focus_areas = """- Patient's main clinical conditions and trajectory
+- Key medical procedures and interventions
+- Medications and treatments
+- Initial risk and protective factors identified
+- Target patient's mortality probability assessment"""
+        elif "risk" in round_name.lower() or "mortality" in round_name.lower():
+            focus_areas = """- Mortality risk factors identified
+- Strength of evidence for each risk factor
+- Similar patient patterns leading to death
+- Clinical reasoning for increased mortality risk
+- Medical evidence supporting mortality prediction"""
+        else:  # protective factors
+            focus_areas = """- Protective factors supporting survival
+- Strength of evidence for each protective factor
+- Similar patient patterns leading to survival
+- Clinical reasoning for decreased mortality risk
+- Medical evidence supporting survival prediction"""
+        
+        summary_prompt = f"""Summarize the following {round_name} from a medical debate for integrated analysis.
+
+Focus on:
+{focus_areas}
+
+Generate a comprehensive summary of approximately {target_tokens} tokens that preserves all critical medical information.
+
+{round_name.title()}: {round_text}
+
+Summary:"""
+
+        try:
+            # Use integrator model for summarization if available (same max model length)
+            summarizer_llm = self.integrator_llm if hasattr(self, 'integrator_llm') else self.llm
+            
+            summary_response = summarizer_llm(
+                summary_prompt,
+                max_tokens=target_tokens,  # Generate exactly the target number of tokens
+                temperature=0.1,
+                stop_sequences=["<|im_end|>", "</s>", "\n\n---", "Summary:"],
+                repetition_penalty=1.3
+            )
+            
+            # Extract summary text
+            if isinstance(summary_response, list):
+                summary_response = summary_response[0] if summary_response else ""
+                if isinstance(summary_response, dict):
+                    summary_response = summary_response.get("generated_text", str(summary_response))
+            elif isinstance(summary_response, dict):
+                summary_response = summary_response.get("generated_text", str(summary_response))
+            
+            summary = summary_response.strip()
+            print(f"[ROUND] {round_name} summarized to {len(summary)} chars (~{len(summary)//4} tokens)")
+            return summary
+            
+        except Exception as e:
+            print(f"[WARNING] {round_name} summarization failed: {e}, using intelligent truncation")
+            # Fallback: intelligent truncation that preserves key information
+            return round_text[-token_limit_chars:]
+    
+    def _prepare_integrator_history(self, debate_history: List[Dict[str, Any]]) -> str:
+        """
+        Prepare history for integrator by summarizing individual rounds if needed and combining them.
+        
+        Args:
+            debate_history: List of all previous debate responses
+            
+        Returns:
+            Combined history text with individual rounds summarized if needed
+        """
+        combined_history = "\n## Previous Analysis:\n"
+        
+        # Process each round individually
+        for entry in debate_history:
+            role = entry.get('role', 'Unknown')
+            message = entry.get('message', '')
+            prediction = entry.get('prediction', 'None')
+            
+            # Determine round type for appropriate summarization
+            if role == "target_patient_analyst":
+                round_name = "target_analysis"
+            elif role == "mortality_risk_assessor":
+                round_name = "risk_assessment"
+            elif role == "protective_factor_analyst":
+                round_name = "protective_analysis"
+            else:
+                round_name = f"{role}_analysis"
+            
+            # Summarize this round if it's too long (>6000 tokens ≈ 24000 chars)
+            processed_message = self._summarize_round_response(message, round_name, target_tokens=4000)
+            
+            # Add to combined history
+            combined_history += f"{role}: {processed_message}"
+            if prediction is not None:
+                combined_history += f" [Prediction: {prediction}]"
+            combined_history += "\n\n"
+        
+        print(f"[INTEGRATOR] Prepared combined history: {len(combined_history)} chars")
+        return combined_history
     
     def _convert_labels_in_text(self, text: str) -> str:
         """Convert mortality labels in text: 0->survive, 1->mortality"""
@@ -464,13 +588,18 @@ Do not include anything after the \\boxed{} prediction."""
         # Format debate history for context (only for Round 1 and Round 3 agents)
         history_text = ""
         if debate_history and role not in ["mortality_risk_assessor", "protective_factor_analyst"]:
-            history_text = "\n## Previous Analysis:\n"
-            for entry in debate_history[-4:]:  # Last 4 entries for context
-                agent_role = entry.get('role', 'Unknown')
-                message = entry.get('message', '')
-                prediction = entry.get('prediction', 'Unknown')
-                history_text += f"{agent_role}: {message} [Prediction: {prediction}]\n"
-            history_text += "\n"
+            if role == "balanced_clinical_integrator":
+                # For integrator: prepare comprehensive history with individual round summarization if needed
+                history_text = self._prepare_integrator_history(debate_history)
+            else:
+                # For other agents: use simple recent context
+                history_text = "\n## Previous Analysis:\n"
+                for entry in debate_history[-4:]:  # Last 4 entries for context
+                    agent_role = entry.get('role', 'Unknown')
+                    message = entry.get('message', '')
+                    prediction = entry.get('prediction', 'Unknown')
+                    history_text += f"{agent_role}: {message} [Prediction: {prediction}]\n"
+                history_text += "\n"
         
         # Perform retrieval if RAG is enabled
         retrieved_docs = []
@@ -486,16 +615,27 @@ Do not include anything after the \\boxed{} prediction."""
                 # Generate query based on role and available context
                 if role == "target_patient_analyst":
                     query = self._convert_labels_in_text(patient_context)
-                elif role == "positive_similar_comparator":
-                    query = self._convert_labels_in_text(f"{patient_context}\n\nSimilar patients with mortality outcomes:\n{similar_patients.get('positive', '')}")
-                elif role == "negative_similar_comparator":
-                    query = self._convert_labels_in_text(f"{patient_context}\n\nSimilar patients with survival outcomes:\n{similar_patients.get('negative', '')}")
-                else:  # medical_knowledge_integrator
+                elif role == "mortality_risk_assessor":
+                    similar_positive = similar_patients.get('positive', '')
+                    # Truncate similar patients if too long, but keep full patient context
+                    if len(similar_positive) > 6000:
+                        similar_positive = similar_positive[:6000] + "...[truncated for retrieval]"
+                    query = self._convert_labels_in_text(f"{patient_context}\n\nSimilar patients with mortality outcomes:\n{similar_positive}")
+                elif role == "protective_factor_analyst":
+                    similar_negative = similar_patients.get('negative', '')
+                    # Truncate similar patients if too long, but keep full patient context
+                    if len(similar_negative) > 6000:
+                        similar_negative = similar_negative[:6000] + "...[truncated for retrieval]"
+                    query = self._convert_labels_in_text(f"{patient_context}\n\nSimilar patients with survival outcomes:\n{similar_negative}")
+                else:  # balanced_clinical_integrator
+                    # For integrator, use prepared history (already has individual round summaries if needed)
                     query = self._convert_labels_in_text(f"{patient_context}\n\nDebate Summary:\n{history_text}")
+                
+                print(f"[RETRIEVE] Query length: {len(query)} chars (no truncation)")
                 
                 # Retrieve documents with patient ID and log directory for saving
                 retrieval_qid = f"{role}_{patient_id}"
-                retrieved_docs = retrieval_tool["func"](query[:4000], qid=retrieval_qid, log_dir=log_dir)  # Limit query length
+                retrieved_docs = retrieval_tool["func"](query, qid=retrieval_qid, log_dir=log_dir)  # Remove arbitrary truncation
                 
                 # Format retrieval context
                 if retrieved_docs:
@@ -504,16 +644,24 @@ Do not include anything after the \\boxed{} prediction."""
                         doc_text = f"[{doc['id']}] {doc['title']}\n{doc['content'][:1000]}..."
                         retrieval_context += f"{doc_text}\n\n"
         
-        # Debug: Check similar patient data
+        # Debug: Check similar patient data (only for agents that use similar patients)
         print(f"\n--- DEBUG: Data for {role.upper()} ---")
         print(f"Target context length: {len(patient_context) if patient_context else 0}")
-        print(f"Similar patients keys: {list(similar_patients.keys()) if similar_patients else 'None'}")
         print(f"Retrieved docs: {len(retrieved_docs)}")
-        if similar_patients:
-            print(f"Positive similars length: {len(similar_patients.get('positive', ''))}")
-            print(f"Negative similars length: {len(similar_patients.get('negative', ''))}")
+        
+        # Only show similar patient info for agents that actually use it
+        if role in ["mortality_risk_assessor", "protective_factor_analyst", "balanced_clinical_integrator"]:
+            print(f"Similar patients keys: {list(similar_patients.keys()) if similar_patients else 'None'}")
+            if similar_patients:
+                print(f"Positive similars length: {len(similar_patients.get('positive', ''))}")
+                print(f"Negative similars length: {len(similar_patients.get('negative', ''))}")
+        
+        # Show history for agents that use it        
+        if role not in ["mortality_risk_assessor", "protective_factor_analyst"]:
             print(f"Length of history text: {len(history_text)}")
-            print(f"Tail of history text: {history_text[-200:]}...")
+            if history_text:
+                print(f"Tail of history text: {history_text[-200:]}...")
+        
         print(f"--- END DEBUG ---\n")
         
         # Build context based on agent role (Phase 1 restructured)
@@ -542,6 +690,12 @@ Do not include anything after the \\boxed{} prediction."""
 
 Provide your clinical analysis and mortality risk assessment:"""
         
+        # Monitor context length
+        prompt_length = len(prompt)
+        print(f"Context Length for {role}: {prompt_length} characters")
+        if logger:
+            logger.info(f"Context Length for {role}: {prompt_length} characters")
+        
         # Generate response
         try:
             start_time = time.time()
@@ -556,12 +710,15 @@ Provide your clinical analysis and mortality risk assessment:"""
             temperature = agent_temps.get(role, 0.5)
             
             # Set token limits based on debate round and role
+            # Note: max_tokens is for generation (new tokens), not input context window
             if role == "target_patient_analyst":
                 max_tokens = 8192  # Round 1: Comprehensive target analysis with full context
             elif role in ["mortality_risk_assessor", "protective_factor_analyst"]:
                 max_tokens = 8192  # Round 2: Detailed comparison analysis with full similar patient context
             else:  # balanced_clinical_integrator
-                max_tokens = 32768  # Round 3: Maximum available tokens for comprehensive integration
+                # Round 3: Can handle 12k tokens input (3×4k token summaries) + generate reasoning
+                # Model context window (32768) - input tokens (~12-16k) = plenty for generation
+                max_tokens = 16384  # Sufficient for comprehensive integration and reasoning
             
             # Select appropriate model based on agent role
             if role == "balanced_clinical_integrator":
@@ -579,7 +736,7 @@ Provide your clinical analysis and mortality risk assessment:"""
                 top_p=0.9,
                 return_format='string',  # Ensure we get a string response
                 stop_sequences=["<|im_end|>", "</s>"],  # Remove boxed stop sequences to allow completion
-                enable_think=True  # Enable thinking mode for better reasoning
+                repetition_penalty=1.15  # Add repetition penalty for better generation quality
             )
             
             generation_time = time.time() - start_time
