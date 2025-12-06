@@ -2,84 +2,122 @@
 
 ## System Overview
 
-This implementation integrates a **four-agent structured debate system** with KARE's temporal patient infrastructure for enhanced mortality prediction on MIMIC-III data. The system replaces KARE's single Claude-based reasoning with specialized multi-agent collaboration while maintaining full compatibility with KARE's temporal patient representation.
+This implementation integrates a **four-agent structured debate system with RAG-enhanced tool calling** with KARE's temporal patient infrastructure for enhanced mortality prediction on MIMIC-III data. The system replaces KARE's single Claude-based reasoning with specialized multi-agent collaboration while maintaining full compatibility with KARE's temporal patient representation.
 
-**Key Innovation**: Four specialized medical AI agents conduct structured three-round debates using temporal patient contexts and precomputed similar patient comparisons to form evidence-based mortality predictions.
+**Key Innovation**: Four specialized medical AI agents conduct structured three-round debates using temporal patient contexts, precomputed similar patient comparisons, and strategic medical evidence retrieval to form evidence-based mortality predictions with automatic summarization for context management.
 
 ## Architecture
 
 ### Current Implementation Pipeline:
 ```
-Temporal Patient Context + Similar Patients (mortality=0/1) → Four-Agent Structured Debate → Binary Prediction (0/1)
+Temporal Patient Context + Similar Patients (mortality=0/1) + MedRAG Retrieval → Four-Agent Structured Debate with Summarization → Binary Prediction (0/1)
 ```
 
 ### Multi-Agent Collaboration Flow:
 ```
-Round 1: Target Patient Analysis (Individual Risk Assessment + Prediction)
-Round 2A: Positive Case Evidence (Mortality-Contributing Factors Only)
-Round 2B: Negative Case Evidence (Survival-Contributing Factors Only)
-Round 3: Final Decision (Contrastive Evidence Integration + Final Prediction)
+Round 1: Target Patient Analysis (Individual Risk Assessment + RAG Retrieval + Prediction)
+Round 2A: Mortality Risk Assessment (Evidence Analysis + RAG Retrieval)
+Round 2B: Protective Factor Analysis (Evidence Analysis + RAG Retrieval)  
+Round 3: Two-Step Tool-Calling Integration:
+  ├── Step 1: Mortality Assessment (Assess → Identify Gaps → Retrieve → Final Mortality Probability)
+  └── Step 2: Survival Assessment (Assess → Identify Gaps → Retrieve → Final Survival Probability)
+```
+
+### Context Management and Summarization:
+```
+Long Debate History → Round-by-Round Summarization → Integrator Context
+├── Target Analysis (>6k tokens) → Bullet Point Summary (~3k chars)
+├── Risk Assessment (>6k tokens) → Bullet Point Summary (~3k chars)  
+├── Protective Analysis (>6k tokens) → Bullet Point Summary (~3k chars)
+└── Combined History → Integrator Input (manageable size)
 ```
 
 ## Four-Agent Specialized System
 
 ### Agent Architecture
-The system employs **four specialized medical AI agents** with distinct analytical perspectives:
+The system employs **four specialized medical AI agents** with distinct analytical perspectives and RAG-enhanced capabilities:
 
 #### 1. **Target Patient Analyst** (Round 1)
-- **Role**: Individual patient risk assessment specialist
-- **Focus**: Temporal EHR progression analysis
+- **Role**: Individual patient risk assessment specialist with medical evidence retrieval
+- **Focus**: Temporal EHR progression analysis + Medical literature consultation
 - **Temperature**: 0.7 (higher creativity for comprehensive analysis)
 - **Max Tokens**: 8,192
+- **RAG Integration**: Retrieves relevant medical evidence based on patient conditions
 - **Specialization**: 
   - Timeline analysis of clinical events
-  - Risk/protective factor identification
+  - Risk/protective factor identification (3 each, balanced assessment)
   - Temporal deterioration pattern detection
-  - Individual mortality probability assessment
+  - Evidence-based preliminary mortality prediction
+- **Output**: `\\boxed{0}` or `\\boxed{1}` + detailed reasoning
 
-#### 2. **Positive Similar Comparator** (Round 2A)
-- **Role**: Mortality evidence specialist
-- **Focus**: Analysis of similar patients with mortality=1 
+#### 2. **Mortality Risk Assessor** (Round 2A)
+- **Role**: Mortality risk evidence specialist
+- **Focus**: Analysis of similar patients with mortality=1 + Medical evidence
 - **Temperature**: 0.3 (focused, consistent analysis)
 - **Max Tokens**: 8,192
-- **Output**: Evidence only (NO prediction)
+- **RAG Integration**: Retrieves mortality risk factors and prognostic indicators
+- **Output**: Evidence analysis only (NO prediction, NO \\boxed{})
 - **Specialization**:
-  - Mortality-contributing factor identification
+  - Mortality-contributing factor identification with strength ratings
   - High-risk pattern extraction from fatal cases
-  - Clinical deterioration pathway analysis
-  - Evidence supporting mortality risk
+  - Medical literature support for mortality risk factors
+  - Evidence quality assessment (Weak/Moderate/Strong)
 
-#### 3. **Negative Similar Comparator** (Round 2B)
+#### 3. **Protective Factor Analyst** (Round 2B)
 - **Role**: Survival evidence specialist
-- **Focus**: Analysis of similar patients with mortality=0
+- **Focus**: Analysis of similar patients with mortality=0 + Protective factors
 - **Temperature**: 0.3 (focused, consistent analysis)
 - **Max Tokens**: 8,192
-- **Output**: Evidence only (NO prediction)
+- **RAG Integration**: Retrieves protective factors and survival indicators
+- **Output**: Evidence analysis only (NO prediction, NO \\boxed{})
 - **Specialization**:
-  - Survival-contributing factor identification
+  - Survival-contributing factor identification with strength ratings
   - Protective pattern extraction from survival cases
-  - Clinical stabilization pathway analysis
-  - Evidence supporting survival chances
+  - Treatment effectiveness and recovery evidence
+  - Evidence quality assessment (Weak/Moderate/Strong)
 
-#### 4. **Medical Knowledge Integrator** (Round 3)
-- **Role**: Final decision maker using contrastive evidence
-- **Focus**: Integration of Round 1 analysis with Round 2 evidence
-- **Temperature**: 0.5 (balanced synthesis)
-- **Max Tokens**: 32,768 (maximum context for comprehensive integration)
-- **Output**: Final binary prediction only
+#### 4. **Balanced Clinical Integrator** (Round 3 - Two-Step Tool-Calling)
+- **Role**: Two-step specialized decision maker with strategic evidence retrieval
+- **Focus**: Separate mortality and survival probability assessments
+- **Temperature**: 0.3 (focused decision making)
+- **Max Tokens**: 32,768 total (8k per step)
+- **Tool-Calling Architecture**:
+  
+  **Step 1: Mortality Assessment Integrator**
+  - Assess available mortality evidence from previous rounds
+  - Identify knowledge gaps for mortality risk assessment
+  - Strategic retrieval: `retrieve("specific mortality risk query based on patient conditions")`
+  - Integrate retrieved evidence with debate history
+  - Output: `MORTALITY PROBABILITY: X.XX`
+  
+  **Step 2: Survival Assessment Integrator**  
+  - Assess available survival evidence from previous rounds
+  - Identify knowledge gaps for protective factors assessment
+  - Strategic retrieval: `retrieve("specific survival/protective factors query based on patient conditions")`
+  - Integrate retrieved evidence with debate history
+  - Output: `SURVIVAL PROBABILITY: X.XX`
+  
+- **Final Decision**: Manual determination based on probability comparison
 - **Specialization**:
-  - Contrastive evidence analysis (mortality vs survival factors)
-  - Round 1 prediction validation/revision
-  - Clinical guideline application
-  - Evidence-weighted final decision making
+  - Strategic medical evidence retrieval based on identified knowledge gaps
+  - Separate mortality vs survival probability assessment
+  - Evidence integration (debate + retrieved medical literature)
+  - Conservative mortality prediction with base rate consideration
 
 ### System Hyperparameters
 
 #### Model Configuration
 - **Base Model**: `Qwen/Qwen3-4B-Instruct-2507`
 - **GPU Setup**: Multi-GPU (default: GPUs 6,7)
-- **Context Window**: 32,768 tokens (262,144 for vllm serve)
+- **Context Window**: 32,768 tokens (enforced input limit for Qwen models)
 - **Response Format**: String-based with structured prediction extraction
+- **RAG Configuration**: 
+  - **Corpus**: MedCorp2 (medical literature database)
+  - **Retriever**: MedCPT (medical domain-specific retriever)
+  - **Retrieval Strategy**: Source-specific retrieval with `medrag_answer_by_source()`
+  - **k Values**: Round 1&2: k=8, Round 3: k=16 (more evidence for integration)
+- **Thinking Mode**: Enabled (`enable_thinking=True`) for enhanced reasoning
+- **Logging**: Reduced verbosity (`disable_log_stats=True`)
 
 #### Generation Parameters
 ```python
@@ -88,31 +126,71 @@ Agent Parameters:
 │   ├── Temperature: 0.7
 │   ├── Top-p: 0.9
 │   ├── Max Tokens: 8,192
-│   └── Stop Sequences: ["\\boxed{0}\n", "\\boxed{1}\n", "<|im_end|>", "</s>"]
-├── Positive Similar Comparator:
+│   ├── Repetition Penalty: 1.15
+│   ├── Stop Sequences: ["<|im_end|>", "</s>"] (allows \\boxed{} completion)
+│   └── RAG Retrieval: k=8 documents from MedCorp2
+├── Mortality Risk Assessor:
 │   ├── Temperature: 0.3
 │   ├── Top-p: 0.9
 │   ├── Max Tokens: 8,192
-│   └── Stop Sequences: ["\\boxed{0}\n", "\\boxed{1}\n", "<|im_end|>", "</s>"]
-├── Negative Similar Comparator:
+│   ├── Repetition Penalty: 1.15
+│   ├── Stop Sequences: ["<|im_end|>", "</s>"]
+│   └── RAG Retrieval: k=8 documents (mortality risk focused)
+├── Protective Factor Analyst:
 │   ├── Temperature: 0.3
 │   ├── Top-p: 0.9
 │   ├── Max Tokens: 8,192
-│   └── Stop Sequences: ["\\boxed{0}\n", "\\boxed{1}\n", "<|im_end|>", "</s>"]
-└── Medical Knowledge Integrator:
-    ├── Temperature: 0.5
-    ├── Top-p: 0.9
-    ├── Max Tokens: 32,768
-    └── Stop Sequences: ["\\boxed{0}\n", "\\boxed{1}\n", "<|im_end|>", "</s>"]
+│   ├── Repetition Penalty: 1.15
+│   ├── Stop Sequences: ["<|im_end|>", "</s>"]
+│   └── RAG Retrieval: k=8 documents (survival factors focused)
+└── Balanced Clinical Integrator (Two-Step):
+    ├── Step 1 - Mortality Assessment:
+    │   ├── Temperature: 0.3
+    │   ├── Max Tokens: 8,192
+    │   ├── Tool Calling: retrieve("mortality risk query")
+    │   ├── RAG Retrieval: k=16 documents
+    │   └── Stop: ["SURVIVAL PROBABILITY:", "Step 2:"]
+    ├── Step 2 - Survival Assessment:
+    │   ├── Temperature: 0.3
+    │   ├── Max Tokens: 8,192
+    │   ├── Tool Calling: retrieve("survival factors query")
+    │   ├── RAG Retrieval: k=16 documents
+    │   └── Stop: ["MORTALITY PROBABILITY:", "Step 1:"]
+    └── Final Integration: Manual probability comparison
+```
+
+#### Context Management and Summarization Parameters
+```python
+Summarization System:
+├── Trigger Threshold: >6,000 tokens (~24,000 chars) per round
+├── Target Length: 3,000 tokens (~12,000 chars) per summary
+├── Word Limit Enforcement: target_tokens // 1.3 words maximum
+├── Character Limit: target_tokens * 4 characters maximum
+├── Generation Parameters:
+│   ├── Max Tokens: target_tokens // 2 (force brevity)
+│   ├── Temperature: 0.0 (deterministic)
+│   ├── Repetition Penalty: 1.5 (avoid redundancy)
+│   └── Stop Sequences: ["\n\n", "Original text", "ORIGINAL:"]
+├── Format: Bullet points (•) for structured conciseness
+├── Safety Layers:
+│   ├── Character truncation if summary > max_chars
+│   ├── Word count truncation if words > word_limit
+│   └── Fallback to intelligent truncation if summarization fails
+└── Quality Control: Multiple enforcement layers prevent expansion
 ```
 
 #### Prediction Format
 - **Round 1**: Binary prediction `\\boxed{0}` or `\\boxed{1}` + detailed analysis
 - **Round 2A/2B**: Evidence-only output (NO predictions, NO \\boxed{})
-- **Round 3**: Final binary prediction `\\boxed{0}` or `\\boxed{1}` only
-- **Extraction Method**: Regex pattern matching for `\\boxed{0}` or `\\boxed{1}`
-- **Fallback Strategy**: Keyword-based extraction ("mortality"/"survival")
-- **Decision Method**: Round 3 integrator decision only (no consensus voting)
+- **Round 3**: Separate probability assessments + manual determination
+  - Step 1: `MORTALITY PROBABILITY: X.XX (0.00 to 1.00)`
+  - Step 2: `SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)`
+  - Final: Manual comparison → higher probability determines prediction
+- **Extraction Method**: 
+  - Round 1: Regex pattern matching for `\\boxed{0}` or `\\boxed{1}`
+  - Round 3: Probability extraction + manual determination logic
+- **Fallback Strategy**: Conservative default to survival (0) if extraction fails
+- **Decision Method**: Two-step integrator with probability-based determination
 
 ## KARE's Temporal Structure Understanding
 
@@ -132,7 +210,79 @@ Agent Parameters:
 
 ## Core Components
 
-### 1. Data Sources (Leveraging KARE's Infrastructure) ✅ IMPLEMENTED
+### 1. Context Management and Summarization System ✅ IMPLEMENTED
+
+#### Automatic Round-by-Round Summarization
+The system implements intelligent context management to handle long debate histories while preserving critical medical information:
+
+```python
+def _summarize_round_response(self, round_text: str, round_name: str, target_tokens: int = 4000) -> str:
+    # Multi-layer length enforcement system
+    
+    # Layer 1: Threshold Check (6000 tokens ≈ 24000 chars)
+    if len(round_text) <= 24000:
+        return round_text  # Keep original if under limit
+    
+    # Layer 2: Strict Constraint Prompt
+    word_limit = target_tokens // 1.3  # Conservative word estimate
+    max_chars = target_tokens * 4      # Conservative character estimate
+    
+    prompt = f"""Create a CONCISE medical summary in EXACTLY {word_limit} words or less.
+    
+    STRICT REQUIREMENTS:
+    - Maximum {word_limit} words
+    - Maximum {max_chars} characters  
+    - Use bullet points for key information
+    - No repetition or redundancy
+    - Focus ONLY on essential medical facts
+    
+    Original text: {round_text}
+    
+    CONCISE SUMMARY ({word_limit} words max):
+    •"""
+    
+    # Layer 3: Constrained Generation
+    summary = llm(prompt, 
+                  max_tokens=target_tokens // 2,  # Force shorter generation
+                  temperature=0.0,                # Deterministic
+                  repetition_penalty=1.5)        # Avoid redundancy
+    
+    # Layer 4: Character Limit Enforcement
+    if len(summary) > max_chars:
+        summary = summary[:max_chars-3] + "..."
+    
+    # Layer 5: Word Count Enforcement  
+    words = summary.split()
+    if len(words) > word_limit:
+        summary = ' '.join(words[:word_limit]) + "..."
+    
+    return summary
+```
+
+#### Context Management Flow
+```
+Individual Round Analysis:
+├── Round 1 (Target Analysis): Raw response → Check length → Summarize if >6k tokens
+├── Round 2A (Risk Assessment): Raw response → Check length → Summarize if >6k tokens  
+├── Round 2B (Protective Analysis): Raw response → Check length → Summarize if >6k tokens
+└── Combined History: Summarized rounds → Integrator input (manageable size)
+
+Integrator Context Preparation:
+└── _prepare_integrator_history():
+    ├── Process each round individually
+    ├── Apply round-specific summarization if needed
+    ├── Combine into structured history format
+    └── Result: ~12k chars max (3 rounds × 4k chars) vs potential 72k+ chars
+```
+
+#### Summarization Quality Control
+- **Format Enforcement**: Bullet points (•) for structured information
+- **Content Focus**: Round-specific focus areas (conditions, risk factors, protective factors)
+- **Length Limits**: Multiple enforcement layers prevent runaway generation
+- **Fallback Strategy**: Intelligent truncation if summarization fails
+- **Medical Preservation**: Designed to preserve critical clinical information
+
+### 2. Data Sources (Leveraging KARE's Infrastructure) ✅ IMPLEMENTED
 - **Test Data**: `/data/wang/junh/datasets/KARE/ehr_data/mimic3_mortality_samples_test.json` (996 temporal instances)
 - **Similar Patients**: `/data/wang/junh/datasets/KARE/patient_context/similar_patient_qwen/patient_to_top_1_patient_contexts_mimic3_mortality.json` (9,717 patient contexts)
 - **Temporal Patient IDs**: Format `{patient_id}_{visit_index}` (e.g., `"10188_1"` for 2-visit context)
@@ -177,105 +327,176 @@ Agent Parameters:
    ```python
    # Agent 1: Target Patient Analyst (Round 1)
    "target_patient_analyst": """
-   You are a specialized medical AI focused on individual patient risk assessment.
+   You are a medical AI that provides balanced clinical assessment for mortality prediction.
    
    Instructions:
-   - Examine conditions, procedures, medications across all visits
-   - Pay attention to temporal progression and clinical trajectory
-   - Identify high-risk factors indicating mortality risk
-   - Consider factor combinations and interactions over time
+   - Read all visits in order and summarize the main clinical story
+   - Review retrieved medical evidence for relevant mortality/survival factors
+   - **BALANCED ASSESSMENT**: List 3 main RISK factors AND 3 main PROTECTIVE factors
+   - Provide brief explanation integrating patient data with medical evidence
+   - Make preliminary prediction based on evidence
+   - Only predict mortality (1) if evidence STRONGLY indicates death is very likely
+   - When uncertain, err toward survival prediction (0)
    - End with: \\boxed{0} for SURVIVAL or \\boxed{1} for MORTALITY
    """,
    
-   # Agent 2: Positive Similar Comparator (Round 2A)
-   "positive_similar_comparator": """
-   You are a medical AI that analyzes similar patients who DIED (mortality = 1).
+   # Agent 2: Mortality Risk Assessor (Round 2A)
+   "mortality_risk_assessor": """
+   You are a medical AI Risk Assessor that identifies mortality risk factors.
    
    Instructions:
-   - Analyze similar fatal cases to identify mortality-contributing factors
-   - Extract patterns that led to death in similar patients
-   - Provide evidence supporting HIGH mortality risk
+   - Analyze common patterns in fatal cases (diseases, procedures, medications)
+   - Review retrieved medical evidence for established mortality risk factors
+   - Identify 3-5 key factors that clearly increase mortality risk
+   - Rate strength of each risk factor (Weak/Moderate/Strong evidence)
+   - Explain why factors indicate increased mortality risk with medical evidence
    - DO NOT make predictions or output \\boxed{0} or \\boxed{1}
-   - Focus only on evidence that supports mortality
+   - Focus only on EVIDENCE that supports MORTALITY
    """,
    
-   # Agent 3: Negative Similar Comparator (Round 2B)
-   "negative_similar_comparator": """
-   You are a medical AI that analyzes similar patients who SURVIVED (mortality = 0).
+   # Agent 3: Protective Factor Analyst (Round 2B)
+   "protective_factor_analyst": """
+   You are a medical AI that identifies factors supporting survival.
    
    Instructions:
-   - Analyze similar survival cases to identify survival-contributing factors
-   - Extract patterns that led to recovery in similar patients
-   - Provide evidence supporting SURVIVAL chances
+   - Analyze common patterns in survival cases (treatments, recovery trajectories)
+   - Review retrieved medical evidence for protective and survival factors
+   - Identify 3-5 key factors that clearly support survival
+   - Rate strength of each protective factor (Weak/Moderate/Strong evidence)
+   - Explain why factors support survival with medical evidence
    - DO NOT make predictions or output \\boxed{0} or \\boxed{1}
-   - Focus only on evidence that supports survival
+   - Focus only on EVIDENCE that supports SURVIVAL
    """,
    
-   # Agent 4: Medical Knowledge Integrator (Round 3)
-   "medical_knowledge_integrator": """
-   You are a specialized medical AI for evidence-based final decision making.
+   # Agent 4A: Mortality Assessment Integrator (Round 3 Step 1)
+   "balanced_clinical_integrator_mortality": """
+   You are a medical AI analyzing MORTALITY risk with tool calling.
+   
+   Available tools: retrieve(query)
    
    Instructions:
-   - Review Round 1 target analysis and initial prediction
-   - Consider Round 2 contrastive evidence (mortality vs survival factors)
-   - Use contrastive reasoning to validate or revise Round 1 prediction
-   - Apply clinical guidelines and evidence-based assessment
-   - Make final decision weighing all evidence
-   - End with: \\boxed{0} for SURVIVAL or \\boxed{1} for MORTALITY
+   1) **INITIAL MORTALITY RISK ASSESSMENT**: Analyze available information focusing on mortality risk factors
+   2) **IDENTIFY KNOWLEDGE GAPS**: Determine what medical evidence you need
+   3) **STRATEGIC RETRIEVAL**: Call retrieve("specific mortality risk query") for needed knowledge
+   4) **EVIDENCE INTEGRATION**: Review retrieved evidence for mortality risk indicators
+   5) **FINAL MORTALITY ASSESSMENT**: Focus ONLY on factors that increase death probability
+   6) Consider base rate: most patients survive, need strong evidence for high mortality
+   - Focus ONLY on mortality risk factors
+   - End with: MORTALITY PROBABILITY: X.XX (0.00 to 1.00)
+   """,
+   
+   # Agent 4B: Survival Assessment Integrator (Round 3 Step 2)  
+   "balanced_clinical_integrator_survival": """
+   You are a medical AI analyzing SURVIVAL probability with tool calling.
+   
+   Available tools: retrieve(query)
+   
+   Instructions:
+   1) **INITIAL SURVIVAL ASSESSMENT**: Analyze available information focusing on protective factors
+   2) **IDENTIFY KNOWLEDGE GAPS**: Determine what medical evidence you need about protective factors
+   3) **STRATEGIC RETRIEVAL**: Call retrieve("specific survival/protective factors query") for needed knowledge
+   4) **EVIDENCE INTEGRATION**: Review retrieved evidence for protective factors and treatment effectiveness
+   5) **FINAL SURVIVAL ASSESSMENT**: Focus ONLY on factors that support patient survival
+   6) Consider treatment effectiveness, patient resilience, positive prognostic factors
+   - Focus ONLY on survival probability and protective factors
+   - End with: SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)
    """
    ```
 
-3. **Evidence-Based Three-Round Flow** ✅ IMPLEMENTED
+3. **Enhanced Four-Round Flow with RAG and Summarization** ✅ IMPLEMENTED
    ```python
    class MortalityDebateSystem:
        def debate_mortality_prediction(self, patient_context, positive_similars, negative_similars, 
                                      medical_knowledge="", patient_id="unknown"):
-           # Setup patient-specific logging
-           log_dir = Path(f"results/kare_mor_{clean_model_name}")
+           # Setup patient-specific logging with structured directory
+           log_dir = Path(f"results/kare_mor_{clean_model_name}/debate_logs")
            log_filename = log_dir / f"debate_responses_{patient_id}.log"
            
            debate_history = []
+           similar_patients_dict = {'positive': positive_similars, 'negative': negative_similars}
            
-           # Round 1: Target Patient Analysis (with prediction)
-           target_response = self._agent_turn("target_patient_analyst", 
-                                            patient_context, similar_patients_dict, 
-                                            medical_knowledge, [], logger)
+           # Round 1: Target Patient Analysis with RAG (with prediction)
+           target_response = self._agent_turn(
+               role="target_patient_analyst",
+               patient_context=patient_context,
+               similar_patients=similar_patients_dict,
+               medical_knowledge=medical_knowledge,
+               debate_history=[],  # No history yet
+               logger=logger,
+               patient_id=patient_id,
+               log_dir=str(log_dir)
+           )
            debate_history.append(target_response)
-           # Result: Individual analysis + binary prediction
+           # Result: Balanced risk/protective analysis + RAG evidence + preliminary prediction
            
-           # Round 2A: Positive Evidence Extraction (NO prediction)
-           positive_response = self._agent_turn("positive_similar_comparator", 
-                                              # NO patient_context, NO debate_history
-                                              None, similar_patients_dict, 
-                                              medical_knowledge, [], logger)
+           # Round 2A: Mortality Risk Assessment with RAG (NO prediction)
+           positive_response = self._agent_turn(
+               role="mortality_risk_assessor",
+               patient_context=patient_context,
+               similar_patients=similar_patients_dict,  # Uses 'positive' similar patients
+               medical_knowledge=medical_knowledge,
+               debate_history=debate_history,  # Has target analysis for context
+               logger=logger,
+               patient_id=patient_id,
+               log_dir=str(log_dir)
+           )
            debate_history.append(positive_response)
-           # Result: Mortality-contributing factors only
+           # Result: Mortality risk factors with strength ratings + RAG evidence
            
-           # Round 2B: Negative Evidence Extraction (NO prediction)
-           negative_response = self._agent_turn("negative_similar_comparator", 
-                                              # NO patient_context, NO debate_history
-                                              None, similar_patients_dict, 
-                                              medical_knowledge, [], logger)
+           # Round 2B: Protective Factor Analysis with RAG (NO prediction)
+           negative_response = self._agent_turn(
+               role="protective_factor_analyst",
+               patient_context=patient_context,
+               similar_patients=similar_patients_dict,  # Uses 'negative' similar patients
+               medical_knowledge=medical_knowledge,
+               debate_history=debate_history,  # Has target + risk analysis
+               logger=logger,
+               patient_id=patient_id,
+               log_dir=str(log_dir)
+           )
            debate_history.append(negative_response)
-           # Result: Survival-contributing factors only
+           # Result: Protective factors with strength ratings + RAG evidence
            
-           # Round 3: Contrastive Integration (final prediction only)
-           integrator_response = self._agent_turn("medical_knowledge_integrator", 
-                                                patient_context, similar_patients_dict, 
-                                                medical_knowledge, debate_history, logger)
+           # Context Management: Automatic summarization of long debate history
+           # _prepare_integrator_history() handles:
+           # - Individual round summarization if >6k tokens (~24k chars)
+           # - Bullet-point format with strict length enforcement
+           # - Multiple safety layers (word limits, character limits, truncation)
+           
+           # Round 3: Two-Step Tool-Calling Integration
+           integrator_response = self._agent_turn(
+               role="balanced_clinical_integrator",  # Triggers two-step process
+               patient_context=patient_context,
+               similar_patients=similar_patients_dict,
+               medical_knowledge=medical_knowledge,
+               debate_history=debate_history,  # Automatically summarized if needed
+               logger=logger,
+               patient_id=patient_id,
+               log_dir=str(log_dir)
+           )
+           # Two-step process:
+           # Step 1: Mortality assessment → identify gaps → retrieve → MORTALITY PROBABILITY: X.XX
+           # Step 2: Survival assessment → identify gaps → retrieve → SURVIVAL PROBABILITY: X.XX
+           # Final: Manual determination (higher probability wins)
+           
            debate_history.append(integrator_response)
-           # Result: Final binary prediction using contrastive evidence
            
-           # Use only integrator's decision (no consensus/voting)
-           final_prediction = integrator_response.get('prediction') or 0
+           # Extract final results
+           final_prediction = integrator_response.get('prediction')
+           final_mortality_prob = integrator_response.get('mortality_probability')
+           final_survival_prob = integrator_response.get('survival_probability')
            
            return {
                'final_prediction': final_prediction,
+               'mortality_probability': final_mortality_prob,
+               'survival_probability': final_survival_prob,
                'debate_history': debate_history,
                'rounds_completed': 3,
                'total_generation_time': sum(r.get('generation_time', 0) for r in debate_history),
                'integrator_prediction': integrator_response.get('prediction'),
-               'target_prediction': target_response.get('prediction')
+               'target_prediction': target_response.get('prediction'),
+               'mortality_retrieved_docs': integrator_response.get('mortality_retrieved_docs', 0),
+               'survival_retrieved_docs': integrator_response.get('survival_retrieved_docs', 0)
            }
    ```
 
@@ -347,9 +568,12 @@ python run_kare_debate_mortality.py --start_idx 0 --num_samples 1 \
 ```json
 {
   "metadata": {
-    "timestamp": "2025-11-25 12:00:00", 
+    "timestamp": "2025-12-06 12:00:00", 
     "total_samples": 996,
-    "include_debate_history": true
+    "include_debate_history": true,
+    "rag_enabled": true,
+    "corpus": "MedCorp2",
+    "retriever": "MedCPT"
   },
   "metrics": {
     "accuracy": 0.847, 
@@ -358,21 +582,59 @@ python run_kare_debate_mortality.py --start_idx 0 --num_samples 1 \
     "f1_score": 0.807,
     "specificity": 0.856,
     "total_samples": 996,
-    "tp": 45, "fp": 12, "fn": 8, "tn": 931
+    "tp": 45, "fp": 12, "fn": 8, "tn": 931,
+    "avg_mortality_probability": 0.124,
+    "avg_survival_probability": 0.876
   },
   "results": [
     {
       "patient_id": "10188_1",
-      "visit_id": "10188_visit_1",
+      "base_patient_id": "10188",
+      "visit_index": 1,
       "ground_truth": 0,
       "prediction": 0,
+      "mortality_probability": 0.15,
+      "survival_probability": 0.85,
+      "confidence": "High",
       "rounds_completed": 3,
-      "total_generation_time": 45.2,
+      "total_generation_time": 67.8,
+      "mortality_retrieved_docs": 16,
+      "survival_retrieved_docs": 16,
       "debate_history": [
-        {"role": "target_patient_analyst", "prediction": 0, "generation_time": 12.1},
-        {"role": "positive_similar_comparator", "prediction": null, "generation_time": 15.3},
-        {"role": "negative_similar_comparator", "prediction": null, "generation_time": 8.7},
-        {"role": "medical_knowledge_integrator", "prediction": 0, "generation_time": 9.1}
+        {
+          "role": "target_patient_analyst", 
+          "prediction": 0, 
+          "generation_time": 14.2,
+          "response_length": 2847,
+          "message": "Based on the temporal EHR analysis..."
+        },
+        {
+          "role": "mortality_risk_assessor", 
+          "prediction": null, 
+          "generation_time": 18.1,
+          "response_length": 2156,
+          "message": "Analysis of mortality risk factors..."
+        },
+        {
+          "role": "protective_factor_analyst", 
+          "prediction": null, 
+          "generation_time": 15.7,
+          "response_length": 1989,
+          "message": "Analysis of protective factors..."
+        },
+        {
+          "role": "balanced_clinical_integrator", 
+          "prediction": 0,
+          "mortality_probability": 0.15,
+          "survival_probability": 0.85,
+          "generation_time": 19.8,
+          "response_length": 4521,
+          "mortality_query": "congestive heart failure mortality risk factors elderly patients with diabetes",
+          "survival_query": "heart failure treatment effectiveness ACE inhibitors beta blockers elderly survival",
+          "mortality_retrieved_docs": 16,
+          "survival_retrieved_docs": 16,
+          "message": "## Mortality Risk Assessment ##\nTool Call: retrieve(\"...\")..."
+        }
       ]
     }
   ]
@@ -400,12 +662,12 @@ Log Content Format:
 
 ## Key Advantages of This Implementation
 
-### 1. **Evidence-Based Debate Architecture** ✅
-- **Clean Role Separation**: Analysis (R1) → Evidence (R2) → Decision (R3)
-- **No Consensus Complexity**: Direct integrator decision, no voting mechanisms
-- **Contrastive Evidence**: Explicit mortality vs survival factor analysis
-- **Focused Round 2**: Pure evidence extraction without prediction bias
-- **Validation-Based Integration**: Round 3 validates Round 1 using Round 2 evidence
+### 1. **Enhanced RAG-Enabled Debate Architecture** ✅
+- **Clean Role Separation**: Analysis (R1) → Evidence (R2A/2B) → Strategic Integration (R3)
+- **Tool-Calling Integration**: Strategic medical evidence retrieval based on identified knowledge gaps
+- **Contrastive Evidence**: Explicit mortality vs survival factor analysis with medical literature support
+- **Two-Step Final Assessment**: Separate mortality and survival probability evaluations
+- **Context Management**: Automatic summarization prevents token overflow while preserving key information
 
 ### 2. **Perfect KARE Infrastructure Integration** ✅
 - **Temporal Consistency**: Correctly handles rolling visit contexts with cumulative history
@@ -414,20 +676,23 @@ Log Content Format:
 - **Context Formatting**: Reproduces KARE's "(new)" and "(continued)" temporal annotations
 - **Binary Prediction**: Clean 0/1 mortality prediction format
 
-### 3. **Superior Reasoning Quality** ✅
-- **Evidence-First Approach**: Round 2 provides pure evidence without prediction bias
-- **Contrastive Analysis**: Explicit mortality vs survival factor identification
-- **Validation Framework**: Round 3 validates Round 1 using comparative evidence
-- **No Information Redundancy**: Clean information flow without duplicate contexts
-- **Interpretable Decisions**: Clear evidence trail from factors to final prediction
+### 3. **Superior Reasoning Quality with Medical Evidence Integration** ✅
+- **Evidence-First Approach**: Round 2 provides pure evidence without prediction bias + medical literature support
+- **Strategic Knowledge Retrieval**: Round 3 identifies knowledge gaps and retrieves specific medical evidence
+- **Separate Probability Assessments**: Independent mortality and survival evaluations prevent bias
+- **Medical Literature Integration**: RAG system provides evidence-based support for all clinical assessments
+- **Balanced Clinical Assessment**: Target analyst provides both risk and protective factors for comprehensive evaluation
+- **Interpretable Decisions**: Clear evidence trail from patient data → medical literature → clinical reasoning → probabilities
 
-### 4. **Production-Ready Infrastructure** ✅
-- **Patient-Specific Logging**: Structured per-patient debate logs in organized directories
-- **Comprehensive Metrics**: Accuracy, precision, recall, F1, specificity with confusion matrix
-- **Scalable Processing**: Handles full 996-sample test set with batch saves
-- **Error Resilience**: Graceful error handling with detailed reporting
-- **Configurable Pipeline**: Command-line interface with model/GPU/parameter flexibility
-- **Research Reproducibility**: Deterministic parameters and complete logging
+### 4. **Production-Ready Infrastructure with Advanced Context Management** ✅
+- **Patient-Specific Logging**: Structured per-patient debate logs in organized directories (`results/kare_mor_{model}/debate_logs/`)
+- **Comprehensive Metrics**: Accuracy, precision, recall, F1, specificity with confusion matrix + probability scores
+- **Scalable Processing**: Handles full 996-sample test set with automatic context management and batch saves
+- **Advanced Summarization**: Multi-layer length enforcement prevents token overflow while preserving medical information
+- **RAG Integration**: Seamless medical literature retrieval with source-specific queries and document saving
+- **Error Resilience**: Graceful error handling with detailed reporting and conservative fallbacks
+- **Configurable Pipeline**: Command-line interface with model/GPU/RAG parameters flexibility
+- **Research Reproducibility**: Deterministic parameters, complete logging, and retrieval document archival
 
 ## Performance Analysis Framework
 

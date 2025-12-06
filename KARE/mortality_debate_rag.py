@@ -93,7 +93,7 @@ class MortalityDebateSystem:
         
         # Initialize main VLLM wrapper for agents 1-3
         os.environ['CUDA_VISIBLE_DEVICES'] = self.main_gpu
-        self.llm = VLLMWrapper(model_name=model_name)  # VLLMWrapper handles max_model_len internally
+        self.llm = VLLMWrapper(model_name=model_name, enable_thinking=True)  # VLLMWrapper handles max_model_len internally
         
         # Initialize integrator VLLM wrapper if different model
         if self.integrator_model_name != model_name:
@@ -110,11 +110,13 @@ class MortalityDebateSystem:
             if tensor_parallel_size > 1:
                 self.integrator_llm = VLLMWrapper(
                     model_name=self.integrator_model_name, 
-                    tensor_parallel_size=tensor_parallel_size  # VLLMWrapper handles max_model_len internally
+                    tensor_parallel_size=tensor_parallel_size,  # VLLMWrapper handles max_model_len internally
+                    enable_thinking=True
                 )
             else:
                 self.integrator_llm = VLLMWrapper(
-                    model_name=self.integrator_model_name  # VLLMWrapper handles max_model_len internally
+                    model_name=self.integrator_model_name,  # VLLMWrapper handles max_model_len internally
+                    enable_thinking=True
                 )
         else:
             print("Using same model for integrator")
@@ -140,7 +142,7 @@ class MortalityDebateSystem:
 
 You have access to:
 1) The target patient's temporal EHR context
-2) Retrieved medical evidence documents (if available)
+2) Retrieved medical evidence documents
 
 IMPORTANT CONTEXT: Mortality is relatively rare. Only patients with extremely very high risk of mortality (definitely die) should be predicted as 1.
 
@@ -149,16 +151,14 @@ Your job:
 2) Review the retrieved medical evidence for relevant mortality/survival factors.
 3) **BALANCED ASSESSMENT**: List 3 main RISK factors that increase mortality risk AND 3 main PROTECTIVE factors that support survival.
 4) Provide a brief explanation (2-3 sentences) integrating patient data with medical evidence.
-5) Estimate probability scores and make prediction.
+5) Make your preliminary prediction based on the evidence.
 
 CONSERVATIVE PREDICTION GUIDELINES:
 - Only predict mortality (1) if evidence STRONGLY indicates death is very likely
 - When uncertain, err toward survival prediction (0)
 - Consider both risk factors AND protective factors in your assessment
 
-CRITICAL FORMAT REQUIREMENT: You MUST end your response with exactly these lines:
-Mortality Probability: X.XX (0.00 to 1.00)
-Survival Probability: X.XX (0.00 to 1.00)
+CRITICAL FORMAT REQUIREMENT: You MUST end your response with exactly this line:
 \\boxed{0} - if you predict SURVIVAL (patient will NOT die in next visit)
 \\boxed{1} - if you predict MORTALITY (patient WILL die in next visit)
 
@@ -204,36 +204,55 @@ IMPORTANT:
 - DO NOT output \\boxed{0} or \\boxed{1}.
 - Your job is only to provide EVIDENCE that supports SURVIVAL (no death in the next visit).""",
 
-            "balanced_clinical_integrator": """You are a medical AI Clinical Integrator that makes the FINAL balanced decision about mortality outcome in the NEXT hospital visit.
+            "balanced_clinical_integrator_mortality": """You are a medical AI Clinical Assistant analyzing MORTALITY risk for the NEXT hospital visit.
+
+Available tools:
+- retrieve(query): Retrieve medical evidence for your mortality risk assessment
+
+You have access to:
+- Target patient's balanced clinical assessment with risk/protective factors
+- Mortality risk factors from Risk Assessor
+- Protective/survival factors from Protective Factor Analyst
+
+IMPORTANT CONTEXT: Mortality is relatively rare. Be conservative in mortality prediction.
+
+Your job:
+1) **INITIAL MORTALITY RISK ASSESSMENT**: First analyze all available information from previous debate rounds focusing on mortality risk factors
+2) **IDENTIFY KNOWLEDGE GAPS**: Determine what specific medical evidence you need to make an informed mortality assessment
+3) **STRATEGIC RETRIEVAL**: Call retrieve("specific mortality risk query") with a targeted query for the medical knowledge you identified as needed
+4) **EVIDENCE INTEGRATION**: Review the retrieved medical evidence specifically for mortality risk indicators and prognostic factors
+5) **FINAL MORTALITY ASSESSMENT**: Weigh all evidence (debate + retrieved) focusing ONLY on factors that increase death probability
+6) Consider the base rate: most patients survive, so strong evidence is needed for high mortality probability
+
+Focus ONLY on mortality risk factors. Do not assess survival - that's the other integrator's job.
+
+Provide comprehensive clinical reasoning and end with:
+MORTALITY PROBABILITY: X.XX (0.00 to 1.00)""",
+
+            "balanced_clinical_integrator_survival": """You are a medical AI Clinical Assistant analyzing SURVIVAL probability for the NEXT hospital visit.
+
+Available tools:
+- retrieve(query): Retrieve medical evidence for your survival probability assessment
 
 You have access to:
 - Target patient's balanced clinical assessment with risk/protective factors (Round 1)
 - Mortality risk factors from Risk Assessor
 - Protective/survival factors from Protective Factor Analyst
-- Retrieved comprehensive medical evidence documents (if available)
 
-IMPORTANT CONTEXT: Mortality is relatively rare. Only patients with extremely very high risk of mortality (definitely die) should be predicted as 1
+IMPORTANT CONTEXT: Most patients in this population survive. Focus on factors supporting survival.
 
 Your job:
-1) **BALANCE ASSESSMENT**: Weigh mortality risks against survival/protective factors systematically.
-2) Review all medical evidence for supporting or contradicting information.
-3) **CONSERVATIVE DECISION MAKING**: Only predict mortality if evidence STRONGLY indicates death is very likely.
-4) Consider the base rate: most patients survive, so strong evidence is needed to predict mortality.
-5) Provide final probability estimates and reasoning.
+1) **INITIAL SURVIVAL ASSESSMENT**: First analyze all available information from previous debate rounds focusing on protective factors and survival indicators
+2) **IDENTIFY KNOWLEDGE GAPS**: Determine what specific medical evidence you need about protective factors, treatment efficacy, and recovery patterns
+3) **STRATEGIC RETRIEVAL**: Call retrieve("specific survival/protective factors query") with a targeted query for the protective medical knowledge you identified as needed
+4) **EVIDENCE INTEGRATION**: Review the retrieved medical evidence specifically for protective factors, treatment effectiveness, and survival indicators
+5) **FINAL SURVIVAL ASSESSMENT**: Weigh all evidence (debate + retrieved) focusing ONLY on factors that support patient survival and recovery potential
+6) Consider treatment effectiveness, patient resilience, and positive prognostic factors
 
-Decision Framework:
-- Strong evidence for mortality + weak protective factors → Consider mortality (1)
-- Moderate evidence for mortality + strong protective factors → Lean survival (0)  
-- Any uncertainty or balanced evidence → Default to survival (0)
+Focus ONLY on survival probability and protective factors. Do not assess mortality risk - that's the other integrator's job.
 
-CRITICAL FORMAT REQUIREMENT: You MUST end your response with exactly these lines:
-Final Mortality Probability: X.XX (0.00 to 1.00)
-Final Survival Probability: X.XX (0.00 to 1.00)
-Confidence Level: [Very High/High/Moderate/Low]
-\\boxed{0} - if your FINAL prediction is SURVIVAL (patient will NOT die in next visit)
-\\boxed{1} - if your FINAL prediction is MORTALITY (patient WILL die in next visit)
-
-Do not include anything after the \\boxed{} prediction."""
+Provide comprehensive clinical reasoning and end with:
+SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
         }
     
     def _create_retrieval_tool(self, k=8):
@@ -347,29 +366,36 @@ Do not include anything after the \\boxed{} prediction."""
 - Clinical reasoning for decreased mortality risk
 - Medical evidence supporting survival prediction"""
         
-        summary_prompt = f"""Summarize the following {round_name} from a medical debate for integrated analysis.
+        summary_prompt = f"""Create a CONCISE medical summary in EXACTLY 6000 tokens or less.
 
-Focus on:
+STRICT REQUIREMENTS:
+- Maximum 6000 tokens
+- Use bullet points for key information
+- No repetition or redundancy
+- Focus ONLY on essential medical facts
+
+Focus areas:
 {focus_areas}
 
-Generate a comprehensive summary of approximately {target_tokens} tokens that preserves all critical medical information.
+Original text ({len(round_text)} chars): {round_text}
 
-{round_name.title()}: {round_text}
-
-Summary:"""
+CONCISE SUMMARY  6000 tokens max):
+•"""
 
         try:
             # Use integrator model for summarization if available (same max model length)
             summarizer_llm = self.integrator_llm if hasattr(self, 'integrator_llm') else self.llm
             
+            # Use much smaller max_tokens to force brevity, with strict stopping
             summary_response = summarizer_llm(
                 summary_prompt,
-                max_tokens=target_tokens,  # Generate exactly the target number of tokens
-                temperature=0.1,
-                stop_sequences=["<|im_end|>", "</s>", "\n\n---", "Summary:"],
-                repetition_penalty=1.3
+                max_tokens=target_tokens // 2,  # Force shorter generation (half the target)
+                temperature=0.1,  # Use deterministic generation for consistency
+                stop_sequences=["<|im_end|>", "</s>", "\n\n", "Original text", "ORIGINAL:"],
+                repetition_penalty=1.5  # Higher penalty to avoid repetition
             )
             
+            max_chars = 6000*4
             # Extract summary text
             if isinstance(summary_response, list):
                 summary_response = summary_response[0] if summary_response else ""
@@ -378,7 +404,18 @@ Summary:"""
             elif isinstance(summary_response, dict):
                 summary_response = summary_response.get("generated_text", str(summary_response))
             
+            # Clean up the summary and enforce limits
             summary = summary_response.strip()
+            
+            # Add bullet point if missing
+            if not summary.startswith('•'):
+                summary = '• ' + summary
+            
+            # Enforce character limit by truncation if needed
+            if len(summary) > max_chars:
+                print(f"[SUMMARIZE] Truncating {round_name} from {len(summary)} to {max_chars} chars")
+                summary = summary[:max_chars-3] + "..."
+            
             print(f"[ROUND] {round_name} summarized to {len(summary)} chars (~{len(summary)//4} tokens)")
             return summary
             
@@ -558,6 +595,349 @@ Summary:"""
         
         return result
     
+    def _parse_tool_call(self, response_text):
+        """
+        Parse tool call from agent response.
+        
+        Args:
+            response_text: Agent's response text
+            
+        Returns:
+            Tuple of (tool_name, query) or (None, None) if no tool call found
+        """
+        # Look for tool call patterns
+        patterns = [
+            r'Tool Call:\s*retrieve\s*\(\s*["\']([^"\']+)["\'\s]*\)',
+            r'retrieve\s*\(\s*["\']([^"\']+)["\'\s]*\)',
+            r'Tool:\s*retrieve\s*\(\s*["\']([^"\']+)["\'\s]*\)',
+            r'RETRIEVE\s*\(\s*["\']([^"\']+)["\'\s]*\)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, response_text, re.IGNORECASE | re.DOTALL)
+            if match:
+                query = match.group(1).strip()
+                return "retrieve", query
+        
+        return None, None
+    
+    def _execute_tool_call(self, tool_name, query, qid=None, log_dir=None):
+        """
+        Execute a tool call for integrator agent.
+        
+        Args:
+            tool_name: Name of the tool to call
+            query: Query parameter for the tool
+            qid: Question ID for logging
+            log_dir: Log directory
+            
+        Returns:
+            Tool execution result
+        """
+        if tool_name == "retrieve" and self.rag_enabled:
+            retrieval_tool = self.retrieval_tools.get("round3")  # Use round3 tool for integrator
+            if retrieval_tool:
+                print(f"[INTEGRATOR TOOL] Executing retrieve('{query}')")
+                return retrieval_tool["func"](query, qid=qid, log_dir=log_dir)
+        
+        print(f"[ERROR] Unknown tool or RAG disabled: {tool_name}")
+        return []
+    
+    def _format_retrieved_docs_for_context(self, retrieved_docs):
+        """
+        Format retrieved documents for inclusion in agent context.
+        
+        Args:
+            retrieved_docs: List of retrieved document dictionaries
+            
+        Returns:
+            Formatted string for inclusion in prompt
+        """
+        if not retrieved_docs:
+            return "No relevant medical evidence retrieved."
+            
+        docs_context = ""
+        for i, doc in enumerate(retrieved_docs):
+            docs_context += f"[Document {i+1}] {doc.get('title', 'Unknown')}\n"
+            docs_context += f"{doc.get('content', '')[:1000]}...\n\n"
+        
+        return docs_context.strip()
+    
+    def _integrator_two_step_prediction(self, 
+                                      patient_context: str,
+                                      similar_patients: Dict[str, str], 
+                                      medical_knowledge: str = "",
+                                      debate_history: List[Dict[str, Any]] = None,
+                                      logger = None,
+                                      patient_id: str = "unknown",
+                                      log_dir: str = None) -> Dict[str, Any]:
+        """
+        Execute two-step integrator prediction: separate mortality and survival assessments.
+        
+        Returns:
+            Combined integrator response with both mortality and survival probabilities
+        """
+        print(f"\n--- BALANCED_CLINICAL_INTEGRATOR TURN (TWO-STEP WITH TOOLS) ---")
+        
+        # Prepare context (same as regular agent turn)
+        history_text = ""
+        if debate_history:
+            history_text = self._prepare_integrator_history(debate_history)
+        
+        # Build context
+        primary_context = f"## Target Patient EHR Context ##\n{patient_context}"
+        secondary_context = f"\n## Mortality Risk Cases ##\n{similar_patients.get('positive', 'None')}"
+        secondary_context += f"\n## Survival Cases ##\n{similar_patients.get('negative', 'None')}"
+        if medical_knowledge:
+            secondary_context += f"\n## Medical Knowledge ##\n{medical_knowledge}"
+        
+        # Step 1: Mortality Assessment with Tool Calling
+        print("Step 1: Assessing mortality probability with tool calling...")
+        mortality_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_mortality"]}
+
+{primary_context}{secondary_context}
+
+## Previous Debate Analysis ##
+{history_text}
+
+Provide your mortality risk assessment using the retrieve tool:"""
+
+        try:
+            start_time = time.time()
+            
+            # Step 1a: Generate tool call for mortality assessment
+            mortality_tool_response = self.integrator_llm(
+                mortality_prompt,
+                max_tokens=8192,  # Focused on tool call generation
+                temperature=0.3,
+                top_p=0.9,
+                return_format='string',
+                stop_sequences=["<|im_end|>", "</s>"],
+                repetition_penalty=1.15
+            )
+            
+            # Step 1b: Parse tool call
+            tool_name, mortality_query = self._parse_tool_call(mortality_tool_response)
+            
+            mortality_retrieved_docs = []
+            if tool_name == "retrieve" and mortality_query:
+                print(f"[MORTALITY] Tool call parsed: retrieve('{mortality_query}')")
+                
+                # Execute tool call
+                mortality_qid = f"mortality_assessment_{patient_id}"
+                mortality_retrieved_docs = self._execute_tool_call(tool_name, mortality_query, qid=mortality_qid, log_dir=log_dir)
+                
+                # Format retrieved docs for context
+                mortality_docs_context = self._format_retrieved_docs_for_context(mortality_retrieved_docs)
+                
+                # Step 1c: Generate full reasoning with retrieved context
+                mortality_reasoning_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_mortality"]}
+
+{primary_context}{secondary_context}
+
+## Previous Debate Analysis ##
+{history_text}
+
+You called: retrieve("{mortality_query}")
+
+Retrieved Evidence:
+{mortality_docs_context}
+
+Now provide your complete mortality probability assessment based on the retrieved evidence:"""
+
+                mortality_response = self.integrator_llm(
+                    mortality_reasoning_prompt,
+                    max_tokens=8192,  # Conservative limit within 32k total budget
+                    temperature=0.3,
+                    top_p=0.9,
+                    return_format='string',
+                    stop_sequences=["<|im_end|>", "</s>", "SURVIVAL PROBABILITY:", "Step 2:"],
+                    repetition_penalty=1.15
+                )
+                
+                # Combine tool call and reasoning
+                mortality_full_response = f"Tool Call: retrieve(\"{mortality_query}\")\n\nRetrieved Documents: {len(mortality_retrieved_docs)} documents\n\n{mortality_response}"
+                
+            else:
+                print(f"[MORTALITY] No valid tool call found, using direct reasoning")
+                mortality_full_response = mortality_tool_response
+            
+            # Extract mortality probability from the final response
+            mortality_prob = None
+            mortality_match = re.search(r'MORTALITY PROBABILITY:\s*([0-9]*\.?[0-9]+)', mortality_full_response, re.IGNORECASE)
+            if mortality_match:
+                mortality_prob = float(mortality_match.group(1))
+                print(f"Step 1 - Extracted mortality probability: {mortality_prob}")
+            
+            # Step 2: Survival Assessment with Tool Calling
+            print("Step 2: Assessing survival probability with tool calling...")
+            survival_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_survival"]}
+
+{primary_context}{secondary_context}
+
+## Previous Debate Analysis ##
+{history_text}
+
+Provide your survival probability assessment using the retrieve tool:"""
+
+            # Step 2a: Generate tool call for survival assessment
+            survival_tool_response = self.integrator_llm(
+                survival_prompt,
+                max_tokens=8192,  # Focused on tool call generation
+                temperature=0.3,
+                top_p=0.9,
+                return_format='string',
+                stop_sequences=["<|im_end|>", "</s>"],
+                repetition_penalty=1.15
+            )
+            
+            # Step 2b: Parse tool call
+            tool_name, survival_query = self._parse_tool_call(survival_tool_response)
+            
+            survival_retrieved_docs = []
+            if tool_name == "retrieve" and survival_query:
+                print(f"[SURVIVAL] Tool call parsed: retrieve('{survival_query}')")
+                
+                # Execute tool call
+                survival_qid = f"survival_assessment_{patient_id}"
+                survival_retrieved_docs = self._execute_tool_call(tool_name, survival_query, qid=survival_qid, log_dir=log_dir)
+                
+                # Format retrieved docs for context
+                survival_docs_context = self._format_retrieved_docs_for_context(survival_retrieved_docs)
+                
+                # Step 2c: Generate full reasoning with retrieved context
+                survival_reasoning_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_survival"]}
+
+{primary_context}{secondary_context}
+
+## Previous Debate Analysis ##
+{history_text}
+
+You called: retrieve("{survival_query}")
+
+Retrieved Evidence:
+{survival_docs_context}
+
+Now provide your complete survival probability assessment based on the retrieved evidence:"""
+
+                survival_response = self.integrator_llm(
+                    survival_reasoning_prompt,
+                    max_tokens=8192,  # Conservative limit within 32k total budget
+                    temperature=0.3,
+                    top_p=0.9,
+                    return_format='string',
+                    stop_sequences=["<|im_end|>", "</s>", "MORTALITY PROBABILITY:", "Step 1:"],
+                    repetition_penalty=1.15
+                )
+                
+                # Combine tool call and reasoning
+                survival_full_response = f"Tool Call: retrieve(\"{survival_query}\")\n\nRetrieved Documents: {len(survival_retrieved_docs)} documents\n\n{survival_response}"
+                
+            else:
+                print(f"[SURVIVAL] No valid tool call found, using direct reasoning")
+                survival_full_response = survival_tool_response
+            
+            # Extract survival probability from the final response
+            survival_prob = None
+            survival_match = re.search(r'SURVIVAL PROBABILITY:\s*([0-9]*\.?[0-9]+)', survival_full_response, re.IGNORECASE)
+            if survival_match:
+                survival_prob = float(survival_match.group(1))
+                print(f"Step 2 - Extracted survival probability: {survival_prob}")
+            
+            generation_time = time.time() - start_time
+            
+            # Manual determination of final prediction based on probabilities
+            final_prediction = None
+            confidence = "Moderate"
+            
+            if mortality_prob is not None and survival_prob is not None:
+                # Use the higher probability to determine prediction
+                if mortality_prob > survival_prob:
+                    final_prediction = 1
+                    confidence = "High" if mortality_prob > 0.7 else "Moderate"
+                else:
+                    final_prediction = 0
+                    confidence = "High" if survival_prob > 0.7 else "Moderate"
+                    
+                print(f"Manual determination: mortality_prob={mortality_prob:.3f}, survival_prob={survival_prob:.3f}")
+                print(f"Final prediction: {final_prediction} (confidence: {confidence})")
+                
+            elif mortality_prob is not None:
+                # Only mortality probability available
+                final_prediction = 1 if mortality_prob > 0.5 else 0
+                confidence = "Low"
+                print(f"Using only mortality probability: {mortality_prob:.3f} -> prediction {final_prediction}")
+                
+            elif survival_prob is not None:
+                # Only survival probability available
+                final_prediction = 0 if survival_prob > 0.5 else 1
+                confidence = "Low"
+                print(f"Using only survival probability: {survival_prob:.3f} -> prediction {final_prediction}")
+                
+            else:
+                # No probabilities extracted - conservative default
+                final_prediction = 0
+                confidence = "Low"
+                print("No probabilities extracted - defaulting to survival (0)")
+            
+            # Combine both responses with tool call information
+            combined_response = f"""## Mortality Risk Assessment ##
+{mortality_full_response}
+
+## Survival Probability Assessment ##
+{survival_full_response}
+
+## Final Integration ##
+Based on the separate tool-assisted assessments:
+- Mortality Probability: {mortality_prob:.3f if mortality_prob is not None else 'N/A'}
+- Survival Probability: {survival_prob:.3f if survival_prob is not None else 'N/A'}
+- Manual Determination: {final_prediction} (Confidence: {confidence})
+- Mortality Retrieved Documents: {len(mortality_retrieved_docs)}
+- Survival Retrieved Documents: {len(survival_retrieved_docs)}"""
+
+            # Log raw response for debugging (same format as other agents)
+            log_message = f"\n{'='*50}\nRAW RESPONSE from BALANCED_CLINICAL_INTEGRATOR\n{'='*50}\nResponse type: {type(combined_response)}\nResponse length: {len(combined_response)}\nFull response: {combined_response}\n{'='*50}"
+            if logger:
+                logger.info(log_message)
+            
+            # Log detailed responses for debugging
+            if logger:
+                logger.info(f"MORTALITY TOOL RESPONSE: {mortality_full_response}")
+                logger.info(f"SURVIVAL TOOL RESPONSE: {survival_full_response}")
+                logger.info(f"EXTRACTED MORTALITY PROBABILITY: {mortality_prob}")
+                logger.info(f"EXTRACTED SURVIVAL PROBABILITY: {survival_prob}")
+                logger.info(f"MANUAL FINAL PREDICTION: {final_prediction}")
+                logger.info(f"MORTALITY QUERY: {mortality_query if 'mortality_query' in locals() else 'N/A'}")
+                logger.info(f"SURVIVAL QUERY: {survival_query if 'survival_query' in locals() else 'N/A'}")
+            
+            return {
+                'role': 'balanced_clinical_integrator',
+                'message': combined_response,
+                'prediction': final_prediction,
+                'mortality_probability': mortality_prob,
+                'survival_probability': survival_prob,
+                'confidence': confidence,
+                'generation_time': generation_time,
+                'prompt_length': len(mortality_prompt) + len(survival_prompt),
+                'response_length': len(combined_response),
+                'mortality_response': mortality_full_response,
+                'survival_response': survival_full_response,
+                'mortality_query': mortality_query if 'mortality_query' in locals() else None,
+                'survival_query': survival_query if 'survival_query' in locals() else None,
+                'mortality_retrieved_docs': len(mortality_retrieved_docs),
+                'survival_retrieved_docs': len(survival_retrieved_docs)
+            }
+            
+        except Exception as e:
+            print(f"Error in integrator two-step prediction: {e}")
+            return {
+                'role': 'balanced_clinical_integrator',
+                'message': f"Error occurred during two-step prediction: {str(e)}",
+                'prediction': 0,  # Conservative default
+                'generation_time': 0,
+                'error': str(e)
+            }
+    
     def _agent_turn(self, 
                    role: str, 
                    patient_context: str, 
@@ -580,6 +960,19 @@ Summary:"""
         Returns:
             Agent response dictionary
         """
+        
+        # Use two-step prediction for integrator
+        if role == "balanced_clinical_integrator":
+            return self._integrator_two_step_prediction(
+                patient_context=patient_context,
+                similar_patients=similar_patients,
+                medical_knowledge=medical_knowledge,
+                debate_history=debate_history,
+                logger=logger,
+                patient_id=patient_id,
+                log_dir=log_dir
+            )
+        
         print(f"\n--- {role.upper()} TURN ---")
         
         # Get system prompt for this role
@@ -716,9 +1109,9 @@ Provide your clinical analysis and mortality risk assessment:"""
             elif role in ["mortality_risk_assessor", "protective_factor_analyst"]:
                 max_tokens = 8192  # Round 2: Detailed comparison analysis with full similar patient context
             else:  # balanced_clinical_integrator
-                # Round 3: Can handle 12k tokens input (3×4k token summaries) + generate reasoning
-                # Model context window (32768) - input tokens (~12-16k) = plenty for generation
-                max_tokens = 16384  # Sufficient for comprehensive integration and reasoning
+                # Round 3: Can handle ~5-10k tokens input + generate comprehensive reasoning  
+                # Model context window (32768) - input tokens (~8k) = ~24k available for generation
+                max_tokens = 32768  # Use full generation capacity for comprehensive integration
             
             # Select appropriate model based on agent role
             if role == "balanced_clinical_integrator":
