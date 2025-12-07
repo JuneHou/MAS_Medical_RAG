@@ -391,7 +391,7 @@ CONCISE SUMMARY  6000 tokens max):
                 summary_prompt,
                 max_tokens=target_tokens // 2,  # Force shorter generation (half the target)
                 temperature=0.1,  # Use deterministic generation for consistency
-                stop_sequences=["<|im_end|>", "</s>", "\n\n", "Original text", "ORIGINAL:"],
+                stop_sequences=["<|im_end|>", "</s>", "\n\n", "Original text", "ORIGINAL:", "End of response.", "---"],
                 repetition_penalty=1.5  # Higher penalty to avoid repetition
             )
             
@@ -679,6 +679,10 @@ CONCISE SUMMARY  6000 tokens max):
         """
         print(f"\n--- BALANCED_CLINICAL_INTEGRATOR TURN (TWO-STEP WITH TOOLS) ---")
         
+        # Log entry into integrator function
+        if logger:
+            logger.info("INTEGRATOR FUNCTION CALLED - Starting two-step prediction")
+        
         # Prepare context (same as regular agent turn)
         history_text = ""
         if debate_history:
@@ -693,6 +697,8 @@ CONCISE SUMMARY  6000 tokens max):
         
         # Step 1: Mortality Assessment with Tool Calling
         print("Step 1: Assessing mortality probability with tool calling...")
+        if logger:
+            logger.info("INTEGRATOR STEP 1: Starting mortality assessment")
         mortality_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_mortality"]}
 
 {primary_context}{secondary_context}
@@ -712,7 +718,7 @@ Provide your mortality risk assessment using the retrieve tool:"""
                 temperature=0.3,
                 top_p=0.9,
                 return_format='string',
-                stop_sequences=["<|im_end|>", "</s>"],
+                stop_sequences=["<|im_end|>", "</s>", "End of response.", "---"],
                 repetition_penalty=1.15
             )
             
@@ -751,7 +757,7 @@ Now provide your complete mortality probability assessment based on the retrieve
                     temperature=0.3,
                     top_p=0.9,
                     return_format='string',
-                    stop_sequences=["<|im_end|>", "</s>", "SURVIVAL PROBABILITY:", "Step 2:"],
+                    stop_sequences=["<|im_end|>", "</s>", "SURVIVAL PROBABILITY:", "Step 2:", "End of response.", "---"],
                     repetition_penalty=1.15
                 )
                 
@@ -771,6 +777,8 @@ Now provide your complete mortality probability assessment based on the retrieve
             
             # Step 2: Survival Assessment with Tool Calling
             print("Step 2: Assessing survival probability with tool calling...")
+            if logger:
+                logger.info("INTEGRATOR STEP 2: Starting survival assessment")
             survival_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_survival"]}
 
 {primary_context}{secondary_context}
@@ -787,7 +795,7 @@ Provide your survival probability assessment using the retrieve tool:"""
                 temperature=0.3,
                 top_p=0.9,
                 return_format='string',
-                stop_sequences=["<|im_end|>", "</s>"],
+                stop_sequences=["<|im_end|>", "</s>", "End of response.", "---"],
                 repetition_penalty=1.15
             )
             
@@ -826,7 +834,7 @@ Now provide your complete survival probability assessment based on the retrieved
                     temperature=0.3,
                     top_p=0.9,
                     return_format='string',
-                    stop_sequences=["<|im_end|>", "</s>", "MORTALITY PROBABILITY:", "Step 1:"],
+                    stop_sequences=["<|im_end|>", "</s>", "MORTALITY PROBABILITY:", "Step 1:", "End of response.", "---"],
                     repetition_penalty=1.15
                 )
                 
@@ -846,39 +854,18 @@ Now provide your complete survival probability assessment based on the retrieved
             
             generation_time = time.time() - start_time
             
-            # Manual determination of final prediction based on probabilities
-            final_prediction = None
-            confidence = "Moderate"
-            
+            # Simple rule: compare mortality vs survival probabilities
             if mortality_prob is not None and survival_prob is not None:
-                # Use the higher probability to determine prediction
-                if mortality_prob > survival_prob:
-                    final_prediction = 1
-                    confidence = "High" if mortality_prob > 0.7 else "Moderate"
-                else:
-                    final_prediction = 0
-                    confidence = "High" if survival_prob > 0.7 else "Moderate"
-                    
+                final_prediction = 1 if mortality_prob > survival_prob else 0
+                confidence = "High" if max(mortality_prob, survival_prob) > 0.7 else "Moderate"
+                
                 print(f"Manual determination: mortality_prob={mortality_prob:.3f}, survival_prob={survival_prob:.3f}")
                 print(f"Final prediction: {final_prediction} (confidence: {confidence})")
-                
-            elif mortality_prob is not None:
-                # Only mortality probability available
-                final_prediction = 1 if mortality_prob > 0.5 else 0
-                confidence = "Low"
-                print(f"Using only mortality probability: {mortality_prob:.3f} -> prediction {final_prediction}")
-                
-            elif survival_prob is not None:
-                # Only survival probability available
-                final_prediction = 0 if survival_prob > 0.5 else 1
-                confidence = "Low"
-                print(f"Using only survival probability: {survival_prob:.3f} -> prediction {final_prediction}")
-                
             else:
-                # No probabilities extracted - conservative default
+                # Fallback: conservative default if probabilities not extracted
                 final_prediction = 0
                 confidence = "Low"
-                print("No probabilities extracted - defaulting to survival (0)")
+                print(f"Missing probabilities: mortality_prob={mortality_prob}, survival_prob={survival_prob} - defaulting to survival (0)")
             
             # Combine both responses with tool call information
             combined_response = f"""## Mortality Risk Assessment ##
@@ -909,6 +896,7 @@ Based on the separate tool-assisted assessments:
                 logger.info(f"MANUAL FINAL PREDICTION: {final_prediction}")
                 logger.info(f"MORTALITY QUERY: {mortality_query if 'mortality_query' in locals() else 'N/A'}")
                 logger.info(f"SURVIVAL QUERY: {survival_query if 'survival_query' in locals() else 'N/A'}")
+                logger.info("INTEGRATOR FUNCTION COMPLETED SUCCESSFULLY")
             
             return {
                 'role': 'balanced_clinical_integrator',
@@ -930,9 +918,18 @@ Based on the separate tool-assisted assessments:
             
         except Exception as e:
             print(f"Error in integrator two-step prediction: {e}")
+            
+            error_message = f"Error occurred during two-step prediction: {str(e)}"
+            
+            # Log error response for debugging (same format as other agents)
+            log_message = f"\n{'='*50}\nRAW RESPONSE from BALANCED_CLINICAL_INTEGRATOR (ERROR)\n{'='*50}\nResponse type: <class 'str'>\nResponse length: {len(error_message)}\nFull response: {error_message}\n{'='*50}"
+            if logger:
+                logger.info(log_message)
+                logger.info(f"INTEGRATOR ERROR: {str(e)}")
+            
             return {
                 'role': 'balanced_clinical_integrator',
-                'message': f"Error occurred during two-step prediction: {str(e)}",
+                'message': error_message,
                 'prediction': 0,  # Conservative default
                 'generation_time': 0,
                 'error': str(e)
@@ -1128,7 +1125,7 @@ Provide your clinical analysis and mortality risk assessment:"""
                 temperature=temperature,
                 top_p=0.9,
                 return_format='string',  # Ensure we get a string response
-                stop_sequences=["<|im_end|>", "</s>"],  # Remove boxed stop sequences to allow completion
+                stop_sequences=["<|im_end|>", "</s>", "End of response.", "---"],  # Remove boxed stop sequences to allow completion
                 repetition_penalty=1.15  # Add repetition penalty for better generation quality
             )
             
