@@ -204,7 +204,7 @@ class KAREDataAdapter:
             negative_block = "No negative similar patients available."
         
         # Extract ground truth label
-        ground_truth = patient_data.get('labels', 0)
+        ground_truth = patient_data.get('label', 0)
         
         return {
             'patient_id': kare_patient_id,
@@ -300,7 +300,7 @@ CRITICAL CONSERVATIVE GUIDELINE: Mortality is relatively rare in this population
         # Count labels
         label_counts = {}
         for sample in self.test_data:
-            label = sample.get('labels', 0)
+            label = sample.get('label', 0)
             label_counts[label] = label_counts.get(label, 0) + 1
         
         # Count patients with similar contexts

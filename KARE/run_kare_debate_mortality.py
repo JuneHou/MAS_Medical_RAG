@@ -194,7 +194,7 @@ def run_kare_debate_evaluation(start_idx: int = 0,
                              retriever_name: str = "MedCPT", 
                              db_dir: str = "/data/wang/junh/githubs/mirage_medrag/MedRAG/src/data/corpus",
                              round1_k: int = 8,
-                             round3_k: int = 16) -> List[Dict[str, Any]]:
+                             round3_k: int =8) -> List[Dict[str, Any]]:
     """
     Run KARE multi-agent debate evaluation.
     
@@ -398,7 +398,7 @@ def main():
     
     # Retrieval parameters for structured output path
     parser.add_argument('--round1_k', type=int, default=8, help='Number of documents to retrieve in Round 1 (for output path naming)')
-    parser.add_argument('--round3_k', type=int, default=16, help='Number of documents to retrieve in Round 3 (for output path naming)')
+    parser.add_argument('--round3_k', type=int, default=8, help='Number of documents to retrieve in Round 3 (for output path naming)')
     
     # MedRAG parameters (only used in RAG mode)
     parser.add_argument('--corpus_name', type=str, default="MedCorp2", help='MedRAG corpus name (default: MedCorp2)')
@@ -412,14 +412,28 @@ def main():
         # Get the directory where this script is located
         script_dir = Path(__file__).parent
         
-        # Clean model name for directory (replace / and - with _)
+        # Clean model names for directory (replace / and - with _)
         clean_model_name = args.model.replace('/', '_').replace('-', '_')
+        
+        # Clean integrator model name (use same as main model if not specified)
+        integrator_model_name = args.integrator_model if args.integrator_model else args.model
+        clean_integrator_name = integrator_model_name.replace('/', '_').replace('-', '_')
         
         # Create structured directory name based on parameters
         if args.mode.lower() == 'rag':
-            dir_name = f"{args.mode}_mor_{clean_model_name}_{args.round1_k}_{args.round3_k}"
+            if clean_model_name == clean_integrator_name:
+                # Same model for both agents and integrator
+                dir_name = f"{args.mode}_mor_{clean_model_name}_{args.round1_k}_{args.round3_k}"
+            else:
+                # Different models
+                dir_name = f"{args.mode}_mor_{clean_model_name}_int_{clean_integrator_name}_{args.round1_k}_{args.round3_k}"
         else:  # cot mode doesn't use retrieval parameters
-            dir_name = f"{args.mode}_mor_{clean_model_name}"
+            if clean_model_name == clean_integrator_name:
+                # Same model for both agents and integrator
+                dir_name = f"{args.mode}_mor_{clean_model_name}"
+            else:
+                # Different models
+                dir_name = f"{args.mode}_mor_{clean_model_name}_int_{clean_integrator_name}"
         
         # Create results directory structure
         results_dir = script_dir / "results" / dir_name

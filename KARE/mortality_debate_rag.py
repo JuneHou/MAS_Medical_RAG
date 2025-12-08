@@ -12,13 +12,15 @@ import time
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 
-# Add MedRAG paths for VLLM wrapper and retrieval
-medrag_root = "/data/wang/junh/githubs/mirage_medrag/MedRAG"
-mirage_src = "/data/wang/junh/githubs/mirage_medrag/MIRAGE/src"
+# Add MedRAG paths for VLLM wrapper and retrieval - using relative paths
+script_dir = Path(__file__).parent.resolve()  # Current KARE folder
+mirage_medrag_root = script_dir.parent.parent / "mirage_medrag"  # Go up 2 levels to find mirage_medrag
+medrag_root = mirage_medrag_root / "MedRAG"
+mirage_src = mirage_medrag_root / "MIRAGE" / "src"
 
-sys.path.insert(0, medrag_root)
-sys.path.insert(0, os.path.join(medrag_root, "src"))
-sys.path.insert(0, mirage_src)
+sys.path.insert(0, str(medrag_root))
+sys.path.insert(0, str(medrag_root / "src"))
+sys.path.insert(0, str(mirage_src))
 
 from run_medrag_vllm import VLLMWrapper, patch_medrag_for_vllm
 from medrag import MedRAG
@@ -209,22 +211,11 @@ IMPORTANT:
 Available tools:
 - retrieve(query): Retrieve medical evidence for your mortality risk assessment
 
-You have access to:
-- Target patient's balanced clinical assessment with risk/protective factors
-- Mortality risk factors from Risk Assessor
-- Protective/survival factors from Protective Factor Analyst
-
-IMPORTANT CONTEXT: Mortality is relatively rare. Be conservative in mortality prediction.
-
-Your job:
-1) **INITIAL MORTALITY RISK ASSESSMENT**: First analyze all available information from previous debate rounds focusing on mortality risk factors
-2) **IDENTIFY KNOWLEDGE GAPS**: Determine what specific medical evidence you need to make an informed mortality assessment
-3) **STRATEGIC RETRIEVAL**: Call retrieve("specific mortality risk query") with a targeted query for the medical knowledge you identified as needed
-4) **EVIDENCE INTEGRATION**: Review the retrieved medical evidence specifically for mortality risk indicators and prognostic factors
-5) **FINAL MORTALITY ASSESSMENT**: Weigh all evidence (debate + retrieved) focusing ONLY on factors that increase death probability
-6) Consider the base rate: most patients survive, so strong evidence is needed for high mortality probability
-
-Focus ONLY on mortality risk factors. Do not assess survival - that's the other integrator's job.
+Instructions:
+1) Call retrieve("mortality risk factors and prognostic indicators") to gather relevant medical evidence
+2) Review all available information and the retrieved evidence
+3) Focus ONLY on factors that increase death probability 
+4) Be conservative: mortality is rare, so strong evidence is needed for high mortality probability
 
 Provide comprehensive clinical reasoning and end with:
 MORTALITY PROBABILITY: X.XX (0.00 to 1.00)""",
@@ -234,22 +225,11 @@ MORTALITY PROBABILITY: X.XX (0.00 to 1.00)""",
 Available tools:
 - retrieve(query): Retrieve medical evidence for your survival probability assessment
 
-You have access to:
-- Target patient's balanced clinical assessment with risk/protective factors (Round 1)
-- Mortality risk factors from Risk Assessor
-- Protective/survival factors from Protective Factor Analyst
-
-IMPORTANT CONTEXT: Most patients in this population survive. Focus on factors supporting survival.
-
-Your job:
-1) **INITIAL SURVIVAL ASSESSMENT**: First analyze all available information from previous debate rounds focusing on protective factors and survival indicators
-2) **IDENTIFY KNOWLEDGE GAPS**: Determine what specific medical evidence you need about protective factors, treatment efficacy, and recovery patterns
-3) **STRATEGIC RETRIEVAL**: Call retrieve("specific survival/protective factors query") with a targeted query for the protective medical knowledge you identified as needed
-4) **EVIDENCE INTEGRATION**: Review the retrieved medical evidence specifically for protective factors, treatment effectiveness, and survival indicators
-5) **FINAL SURVIVAL ASSESSMENT**: Weigh all evidence (debate + retrieved) focusing ONLY on factors that support patient survival and recovery potential
-6) Consider treatment effectiveness, patient resilience, and positive prognostic factors
-
-Focus ONLY on survival probability and protective factors. Do not assess mortality risk - that's the other integrator's job.
+Instructions:
+1) Call retrieve("protective factors and survival indicators") to gather relevant medical evidence
+2) Review all available information and the retrieved evidence
+3) Focus ONLY on factors that support patient survival and recovery potential
+4) Consider: most patients survive, so identify positive prognostic factors
 
 Provide comprehensive clinical reasoning and end with:
 SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
@@ -266,6 +246,7 @@ SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
                 print(f"[RETRIEVE] Query length: {len(query)} chars")
                 
                 # Use MedRAG retrieval system following run_debate_medrag_rag.py pattern
+                # Note: save_dir=None to prevent creation of MedRAG intermediate files (snippets.json, response.json, etc.)
                 if hasattr(self.medrag, 'answer') and self.medrag.corpus_name == "MedCorp2":
                     # Use the optimized source-specific retrieval for MedCorp2
                     _, retrieved_snippets, scores = self.medrag.medrag_answer_by_source(
@@ -273,7 +254,7 @@ SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
                         options=None, 
                         k=k, 
                         rrf_k=60,
-                        save_dir=log_dir
+                        save_dir=None  # Disable MedRAG intermediate file creation
                     )
                 else:
                     # Use standard MedRAG retrieval
@@ -282,7 +263,7 @@ SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
                         options=None,
                         k=k,
                         rrf_k=60,
-                        save_dir=log_dir
+                        save_dir=None  # Disable MedRAG intermediate file creation
                     )
                 
                 # Format retrieved documents for tool output following run_debate_medrag_rag.py pattern
@@ -510,30 +491,35 @@ CONCISE SUMMARY  6000 tokens max):
             'confidence': None
         }
         
-        # Extract mortality probability
+        # Extract mortality probability - handle various formats
         mortality_patterns = [
             r'Mortality Probability:\s*([0-9]*\.?[0-9]+)',
-            r'Final Mortality Probability:\s*([0-9]*\.?[0-9]+)',
+            r'Final Mortality Probability:\s*([0-9]*\.?[0-9]+)', 
+            r'MORTALITY PROBABILITY:\s*([0-9]*\.?[0-9]+)',
             r'mortality\s*probability\s*:?\s*([0-9]*\.?[0-9]+)',
+            r'\\boxed\{([0-9]*\.?[0-9]+)\}.*MORTALITY PROBABILITY',  # Handle boxed format
         ]
         for pattern in mortality_patterns:
-            match = re.search(pattern, response, re.IGNORECASE)
+            match = re.search(pattern, response, re.IGNORECASE | re.DOTALL)
             if match:
                 result['mortality_probability'] = float(match.group(1))
-                print(f"Debug: Found mortality probability {result['mortality_probability']}")
+                print(f"Debug: Found mortality probability {result['mortality_probability']} with pattern: {pattern}")
                 break
                 
-        # Extract survival probability  
+        # Extract survival probability - handle various formats including uppercase
         survival_patterns = [
             r'Survival Probability:\s*([0-9]*\.?[0-9]+)',
-            r'Final Survival Probability:\s*([0-9]*\.?[0-9]+)', 
+            r'Final Survival Probability:\s*([0-9]*\.?[0-9]+)',
+            r'SURVIVAL PROBABILITY:\s*([0-9]*\.?[0-9]+)',
             r'survival\s*probability\s*:?\s*([0-9]*\.?[0-9]+)',
+            r'\\text\{SURVIVAL PROBABILITY\}\s*=\s*([0-9]*\.?[0-9]+)',  # Handle LaTeX format
+            r'SURVIVAL PROBABILITY\s*=\s*([0-9]*\.?[0-9]+)',  # Handle equals format
         ]
         for pattern in survival_patterns:
-            match = re.search(pattern, response, re.IGNORECASE)
+            match = re.search(pattern, response, re.IGNORECASE | re.DOTALL)
             if match:
                 result['survival_probability'] = float(match.group(1))
-                print(f"Debug: Found survival probability {result['survival_probability']}")
+                print(f"Debug: Found survival probability {result['survival_probability']} with pattern: {pattern}")
                 break
                 
         # Extract confidence level
@@ -611,6 +597,8 @@ CONCISE SUMMARY  6000 tokens max):
             r'retrieve\s*\(\s*["\']([^"\']+)["\'\s]*\)',
             r'Tool:\s*retrieve\s*\(\s*["\']([^"\']+)["\'\s]*\)',
             r'RETRIEVE\s*\(\s*["\']([^"\']+)["\'\s]*\)',
+            # Pattern for code blocks with ```python\nretrieve("query")\n```
+            r'```(?:python)?\s*\n\s*retrieve\s*\(\s*["\']([^"\']+)["\'\s]*\)\s*\n\s*```',
         ]
         
         for pattern in patterns:
@@ -706,7 +694,7 @@ CONCISE SUMMARY  6000 tokens max):
 ## Previous Debate Analysis ##
 {history_text}
 
-Provide your mortality risk assessment using the retrieve tool:"""
+Start by calling retrieve() to gather medical evidence:"""
 
         try:
             start_time = time.time()
@@ -725,7 +713,10 @@ Provide your mortality risk assessment using the retrieve tool:"""
             # Step 1b: Parse tool call
             tool_name, mortality_query = self._parse_tool_call(mortality_tool_response)
             
+            # Initialize variables to ensure they're always defined
             mortality_retrieved_docs = []
+            mortality_full_response = ""
+            mortality_query = mortality_query or "No query parsed"
             if tool_name == "retrieve" and mortality_query:
                 print(f"[MORTALITY] Tool call parsed: retrieve('{mortality_query}')")
                 
@@ -774,6 +765,8 @@ Now provide your complete mortality probability assessment based on the retrieve
             if mortality_match:
                 mortality_prob = float(mortality_match.group(1))
                 print(f"Step 1 - Extracted mortality probability: {mortality_prob}")
+            else:
+                print(f"Step 1 - FAILED to extract mortality probability")
             
             # Step 2: Survival Assessment with Tool Calling
             print("Step 2: Assessing survival probability with tool calling...")
@@ -786,7 +779,7 @@ Now provide your complete mortality probability assessment based on the retrieve
 ## Previous Debate Analysis ##
 {history_text}
 
-Provide your survival probability assessment using the retrieve tool:"""
+Start by calling retrieve() to gather medical evidence:"""
 
             # Step 2a: Generate tool call for survival assessment
             survival_tool_response = self.integrator_llm(
@@ -802,7 +795,10 @@ Provide your survival probability assessment using the retrieve tool:"""
             # Step 2b: Parse tool call
             tool_name, survival_query = self._parse_tool_call(survival_tool_response)
             
+            # Initialize variables to ensure they're always defined  
             survival_retrieved_docs = []
+            survival_full_response = ""
+            survival_query = survival_query or "No query parsed"
             if tool_name == "retrieve" and survival_query:
                 print(f"[SURVIVAL] Tool call parsed: retrieve('{survival_query}')")
                 
@@ -847,12 +843,28 @@ Now provide your complete survival probability assessment based on the retrieved
             
             # Extract survival probability from the final response
             survival_prob = None
-            survival_match = re.search(r'SURVIVAL PROBABILITY:\s*([0-9]*\.?[0-9]+)', survival_full_response, re.IGNORECASE)
-            if survival_match:
-                survival_prob = float(survival_match.group(1))
-                print(f"Step 2 - Extracted survival probability: {survival_prob}")
+            # Try multiple patterns for probability extraction
+            survival_patterns = [
+                r'SURVIVAL PROBABILITY:\s*([0-9]*\.?[0-9]+)',  # Standard format
+                r'survival probability at around \*\*([0-9]*\.?[0-9]+)\*\*',  # Bold format
+                r'estimate.*?survival.*?([0-9]*\.?[0-9]+)',  # Estimate format
+                r'([0-9]*\.?[0-9]+).*?reflecting.*?survival',  # Contextual format
+            ]
+            
+            for pattern in survival_patterns:
+                survival_match = re.search(pattern, survival_full_response, re.IGNORECASE)
+                if survival_match:
+                    survival_prob = float(survival_match.group(1))
+                    print(f"Step 2 - Extracted survival probability: {survival_prob} (pattern: {pattern})")
+                    break
+            
+            if survival_prob is None:
+                print(f"Step 2 - FAILED to extract survival probability")
             
             generation_time = time.time() - start_time
+            
+            # Debug: Show what we extracted
+            print(f"DEBUG: mortality_prob = {mortality_prob}, survival_prob = {survival_prob}")
             
             # Simple rule: compare mortality vs survival probabilities
             if mortality_prob is not None and survival_prob is not None:
@@ -867,8 +879,14 @@ Now provide your complete survival probability assessment based on the retrieved
                 confidence = "Low"
                 print(f"Missing probabilities: mortality_prob={mortality_prob}, survival_prob={survival_prob} - defaulting to survival (0)")
             
-            # Combine both responses with tool call information
-            combined_response = f"""## Mortality Risk Assessment ##
+            # Combine both responses with tool call information (with safe formatting)
+            try:
+                mortality_prob_str = f"{mortality_prob:.3f}" if mortality_prob is not None else 'N/A'
+                survival_prob_str = f"{survival_prob:.3f}" if survival_prob is not None else 'N/A'
+                mortality_docs_count = len(mortality_retrieved_docs) if mortality_retrieved_docs else 0
+                survival_docs_count = len(survival_retrieved_docs) if survival_retrieved_docs else 0
+                
+                combined_response = f"""## Mortality Risk Assessment ##
 {mortality_full_response}
 
 ## Survival Probability Assessment ##
@@ -876,11 +894,14 @@ Now provide your complete survival probability assessment based on the retrieved
 
 ## Final Integration ##
 Based on the separate tool-assisted assessments:
-- Mortality Probability: {mortality_prob:.3f if mortality_prob is not None else 'N/A'}
-- Survival Probability: {survival_prob:.3f if survival_prob is not None else 'N/A'}
+- Mortality Probability: {mortality_prob_str}
+- Survival Probability: {survival_prob_str}
 - Manual Determination: {final_prediction} (Confidence: {confidence})
-- Mortality Retrieved Documents: {len(mortality_retrieved_docs)}
-- Survival Retrieved Documents: {len(survival_retrieved_docs)}"""
+- Mortality Retrieved Documents: {mortality_docs_count}
+- Survival Retrieved Documents: {survival_docs_count}"""
+            except Exception as e:
+                print(f"Error creating combined response: {e}")
+                combined_response = f"Integration completed with mortality_prob={mortality_prob}, survival_prob={survival_prob}, prediction={final_prediction}"
 
             # Log raw response for debugging (same format as other agents)
             log_message = f"\n{'='*50}\nRAW RESPONSE from BALANCED_CLINICAL_INTEGRATOR\n{'='*50}\nResponse type: {type(combined_response)}\nResponse length: {len(combined_response)}\nFull response: {combined_response}\n{'='*50}"
@@ -901,6 +922,7 @@ Based on the separate tool-assisted assessments:
             return {
                 'role': 'balanced_clinical_integrator',
                 'message': combined_response,
+                'response': combined_response,  # Add response key for compatibility
                 'prediction': final_prediction,
                 'mortality_probability': mortality_prob,
                 'survival_probability': survival_prob,
