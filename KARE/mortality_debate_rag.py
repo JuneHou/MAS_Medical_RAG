@@ -12,15 +12,13 @@ import time
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 
-# Add MedRAG paths for VLLM wrapper and retrieval - using relative paths
-script_dir = Path(__file__).parent.resolve()  # Current KARE folder
-mirage_medrag_root = script_dir.parent.parent / "mirage_medrag"  # Go up 2 levels to find mirage_medrag
-medrag_root = mirage_medrag_root / "MedRAG"
-mirage_src = mirage_medrag_root / "MIRAGE" / "src"
+# Add MedRAG paths for VLLM wrapper and retrieval
+medrag_root = "/data/wang/junh/githubs/mirage_medrag/MedRAG"
+mirage_src = "/data/wang/junh/githubs/mirage_medrag/MIRAGE/src"
 
-sys.path.insert(0, str(medrag_root))
-sys.path.insert(0, str(medrag_root / "src"))
-sys.path.insert(0, str(mirage_src))
+sys.path.insert(0, medrag_root)
+sys.path.insert(0, os.path.join(medrag_root, "src"))
+sys.path.insert(0, mirage_src)
 
 from run_medrag_vllm import VLLMWrapper, patch_medrag_for_vllm
 from medrag import MedRAG
@@ -212,7 +210,7 @@ Available tools:
 - retrieve(query): Retrieve medical evidence for your mortality risk assessment
 
 Instructions:
-1) Call retrieve("mortality risk factors and prognostic indicators") to gather relevant medical evidence
+1) Based on the patient's specific conditions, call retrieve() with a custom query about their mortality risk factors (e.g., "sepsis mortality risk elderly patients" or "respiratory failure cardiac arrest prognosis")
 2) Review all available information and the retrieved evidence
 3) Focus ONLY on factors that increase death probability 
 4) Be conservative: mortality is rare, so strong evidence is needed for high mortality probability
@@ -226,7 +224,7 @@ Available tools:
 - retrieve(query): Retrieve medical evidence for your survival probability assessment
 
 Instructions:
-1) Call retrieve("protective factors and survival indicators") to gather relevant medical evidence
+1) Based on the patient's specific conditions, call retrieve() with a custom query about their survival factors (e.g., "diabetes heart failure recovery outcomes" or "pneumonia treatment survival elderly")
 2) Review all available information and the retrieved evidence
 3) Focus ONLY on factors that support patient survival and recovery potential
 4) Consider: most patients survive, so identify positive prognostic factors
@@ -277,8 +275,8 @@ SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
                         'source': doc.get('source_type', 'unknown')
                     })
                 
-                # Save retrieved documents to log directory if provided
-                if log_dir and qid:
+                # Save retrieved documents to log directory if provided (only for integrator queries)
+                if log_dir and qid and ("mortality_assessment" in qid or "survival_assessment" in qid):
                     retrieval_file = Path(log_dir) / f"retrieve_{qid}.json"
                     retrieval_file.parent.mkdir(parents=True, exist_ok=True)
                     
@@ -296,6 +294,7 @@ SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
                         json.dump(retrieval_data, f, indent=2, ensure_ascii=False)
                     
                     print(f"[RETRIEVE] Saved {len(formatted_docs)} documents to {retrieval_file}")
+                    print(f"[RETRIEVE] Query logged to file: '{query}'")
                 
                 print(f"[RETRIEVE] Retrieved {len(formatted_docs)} documents")
                 return formatted_docs
@@ -713,6 +712,15 @@ Start by calling retrieve() to gather medical evidence:"""
             # Step 1b: Parse tool call
             tool_name, mortality_query = self._parse_tool_call(mortality_tool_response)
             
+            # Debug logging for tool call parsing
+            print(f"[DEBUG MORTALITY] Raw LLM response length: {len(mortality_tool_response)}")
+            print(f"[DEBUG MORTALITY] Raw LLM response preview: {mortality_tool_response[:500]}...")
+            print(f"[DEBUG MORTALITY] Parsed tool_name: {tool_name}")
+            print(f"[DEBUG MORTALITY] Parsed query: '{mortality_query}'")
+            if logger:
+                logger.info(f"MORTALITY RAW LLM RESPONSE: {mortality_tool_response}")
+                logger.info(f"MORTALITY PARSED TOOL CALL: tool='{tool_name}', query='{mortality_query}'")
+            
             # Initialize variables to ensure they're always defined
             mortality_retrieved_docs = []
             mortality_full_response = ""
@@ -794,6 +802,15 @@ Start by calling retrieve() to gather medical evidence:"""
             
             # Step 2b: Parse tool call
             tool_name, survival_query = self._parse_tool_call(survival_tool_response)
+            
+            # Debug logging for tool call parsing
+            print(f"[DEBUG SURVIVAL] Raw LLM response length: {len(survival_tool_response)}")
+            print(f"[DEBUG SURVIVAL] Raw LLM response preview: {survival_tool_response[:500]}...")
+            print(f"[DEBUG SURVIVAL] Parsed tool_name: {tool_name}")
+            print(f"[DEBUG SURVIVAL] Parsed query: '{survival_query}'")
+            if logger:
+                logger.info(f"SURVIVAL RAW LLM RESPONSE: {survival_tool_response}")
+                logger.info(f"SURVIVAL PARSED TOOL CALL: tool='{tool_name}', query='{survival_query}'")
             
             # Initialize variables to ensure they're always defined  
             survival_retrieved_docs = []
