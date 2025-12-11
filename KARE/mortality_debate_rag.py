@@ -235,26 +235,54 @@ SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
             try:
                 print(f"[RETRIEVE] Query length: {len(query)} chars")
                 
-                # Use MedRAG retrieval system following run_debate_medrag_rag.py pattern
-                # Note: save_dir=None to prevent creation of MedRAG intermediate files (snippets.json, response.json, etc.)
-                if hasattr(self.medrag, 'answer') and self.medrag.corpus_name == "MedCorp2":
-                    # Use the optimized source-specific retrieval for MedCorp2
-                    _, retrieved_snippets, scores = self.medrag.medrag_answer_by_source(
-                        question=query, 
-                        options=None, 
-                        k=k, 
-                        rrf_k=60,
-                        save_dir=None  # Disable MedRAG intermediate file creation
-                    )
+                # Use ONLY MedRAG retrieval system (bypass LLM generation that causes query length issues)
+                # IMPORTANT: MedRAG's medrag_answer methods call self.generate() which uses LLM and has query length limits
+                # We only need retrieval, so call the retrieval system directly
+                if hasattr(self.medrag, 'source_retrievers') and self.medrag.corpus_name == "MedCorp2":
+                    # Use direct source-specific retrieval for MedCorp2 (bypass LLM generation)
+                    print(f"[RETRIEVE] Using direct source retrieval for MedCorp2 (bypassing LLM generation)")
+                    
+                    # Retrieve from both sources directly
+                    k_medcorp = k // 2 + k % 2  # Give extra to general literature if odd
+                    k_umls = k // 2
+                    
+                    all_retrieved_snippets = []
+                    all_scores = []
+                    
+                    for source, k_source in [("medcorp", k_medcorp), ("umls", k_umls)]:
+                        if source in self.medrag.source_retrievers:
+                            print(f"  Retrieving {k_source} docs from {source}")
+                            source_retrieval_system = self.medrag.source_retrievers[source]
+                            snippets, scores = source_retrieval_system.retrieve(query, k=k_source, rrf_k=60)
+                            all_retrieved_snippets.extend(snippets)
+                            all_scores.extend(scores)
+                    
+                    retrieved_snippets = all_retrieved_snippets
+                    scores = all_scores
+                    
+                elif hasattr(self.medrag, 'retrieval_system') and self.medrag.retrieval_system:
+                    # Use direct retrieval system (bypass LLM generation)
+                    print(f"[RETRIEVE] Using direct retrieval system (bypassing LLM generation)")
+                    retrieved_snippets, scores = self.medrag.retrieval_system.retrieve(query, k=k, rrf_k=60)
                 else:
-                    # Use standard MedRAG retrieval
-                    _, retrieved_snippets, scores = self.medrag.medrag_answer(
-                        question=query,
-                        options=None,
-                        k=k,
-                        rrf_k=60,
-                        save_dir=None  # Disable MedRAG intermediate file creation
-                    )
+                    # Fallback to MedRAG methods (may have query length issues)
+                    print(f"[WARNING] Using MedRAG methods with potential query length limits")
+                    if hasattr(self.medrag, 'answer') and self.medrag.corpus_name == "MedCorp2":
+                        _, retrieved_snippets, scores = self.medrag.medrag_answer_by_source(
+                            question=query,  # Truncate query to avoid length issues
+                            options=None, 
+                            k=k, 
+                            rrf_k=60,
+                            save_dir=None
+                        )
+                    else:
+                        _, retrieved_snippets, scores = self.medrag.medrag_answer(
+                            question=query,  # Truncate query to avoid length issues
+                            options=None,
+                            k=k,
+                            rrf_k=60,
+                            save_dir=None
+                        )
                 
                 # Format retrieved documents for tool output following run_debate_medrag_rag.py pattern
                 formatted_docs = []
