@@ -339,6 +339,8 @@ def run_kare_debate_evaluation(start_idx: int = 0,
                 except Exception as e:
                     error_count += 1
                     print(f"\nError processing sample {i}: {e}")
+                    import traceback
+                    traceback.print_exc()
                     
                     # Add error result
                     try:
@@ -355,30 +357,48 @@ def run_kare_debate_evaluation(start_idx: int = 0,
                     except:
                         pass  # Skip if we can't even get sample data
                     
-                    if error_count > 10:  # Stop if too many errors
-                        print("Too many errors, stopping evaluation.")
+                    # Save after errors to avoid data loss
+                    if output_path and error_count % 5 == 0:
+                        print(f"Saving results after {error_count} errors...")
+                        metrics = calculate_metrics(results)
+                        save_results(results, metrics, output_path, include_debate_history)
+                    
+                    # Increase error threshold and add warning
+                    if error_count > 50:  # Increased from 10 to 50
+                        print(f"WARNING: Too many errors ({error_count}), stopping evaluation.")
                         break
     
     except KeyboardInterrupt:
         print("\nEvaluation interrupted by user.")
     
+    finally:
+        # ALWAYS save results before exiting, even if interrupted or crashed
+        print(f"\nSaving final results before exit...")
+        if output_path and results:
+            try:
+                metrics = calculate_metrics(results)
+                save_results(results, metrics, output_path, include_debate_history)
+                print(f"Final save completed: {len(results)} results saved.")
+            except Exception as e:
+                print(f"ERROR during final save: {e}")
+                import traceback
+                traceback.print_exc()
+    
     print(f"\nEvaluation completed. Processed {len(results)} samples with {error_count} errors.")
     
-    # Calculate final metrics
-    metrics = calculate_metrics(results)
-    
-    # Print final results
-    print(f"\nFinal Results:")
-    print(f"Total Samples: {metrics.get('total_samples', 0)}")
-    print(f"Accuracy: {metrics.get('accuracy', 0):.3f}")
-    print(f"Precision: {metrics.get('precision', 0):.3f}")
-    print(f"Recall: {metrics.get('recall', 0):.3f}")
-    print(f"F1 Score: {metrics.get('f1_score', 0):.3f}")
-    print(f"Specificity: {metrics.get('specificity', 0):.3f}")
-    
-    # Save final results
-    if output_path:
-        save_results(results, metrics, output_path, include_debate_history)
+    # Calculate and print final metrics
+    if results:
+        metrics = calculate_metrics(results)
+        
+        print(f"\nFinal Results:")
+        print(f"Total Samples: {metrics.get('total_samples', 0)}")
+        print(f"Accuracy: {metrics.get('accuracy', 0):.3f}")
+        print(f"Precision: {metrics.get('precision', 0):.3f}")
+        print(f"Recall: {metrics.get('recall', 0):.3f}")
+        print(f"F1 Score: {metrics.get('f1_score', 0):.3f}")
+        print(f"Specificity: {metrics.get('specificity', 0):.3f}")
+    else:
+        print("\nNo results to display.")
     
     return results
 
@@ -423,10 +443,10 @@ def main():
         if args.mode.lower() == 'rag':
             if clean_model_name == clean_integrator_name:
                 # Same model for both agents and integrator
-                dir_name = f"{args.mode}_mor_{clean_model_name}_{args.round1_k}_{args.round3_k}"
+                dir_name = f"{args.mode}_mor_{clean_model_name}_{args.retriever_name}_{args.round1_k}_{args.round3_k}"
             else:
                 # Different models
-                dir_name = f"{args.mode}_mor_{clean_model_name}_int_{clean_integrator_name}_{args.round1_k}_{args.round3_k}"
+                dir_name = f"{args.mode}_mor_{clean_model_name}_int_{clean_integrator_name}_{args.retriever_name}_{args.round1_k}_{args.round3_k}"
         else:  # cot mode doesn't use retrieval parameters
             if clean_model_name == clean_integrator_name:
                 # Same model for both agents and integrator

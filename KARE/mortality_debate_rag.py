@@ -138,71 +138,63 @@ class MortalityDebateSystem:
         """Initialize specialized prompts for each agent role."""
         
         return {
-            "target_patient_analyst": """You are a medical AI that provides balanced clinical assessment for mortality prediction in the NEXT hospital visit.
+            "target_patient_analyst": """You are a medical AI analyzing a patient's EHR to predict mortality risk in their NEXT hospital visit.
 
-You have access to:
-1) The target patient's temporal EHR context
-2) Retrieved medical evidence documents
+IMPORTANT: Mortality is rare - only predict death (1) if evidence STRONGLY supports it. When uncertain, predict survival (0).
 
-IMPORTANT CONTEXT: Mortality is relatively rare. Only patients with extremely very high risk of mortality (definitely die) should be predicted as 1.
+Analyze the patient data and provide:
 
-Your job:
-1) Read all visits in order and summarize the main clinical story (conditions, procedures, medications).
-2) Review the retrieved medical evidence for relevant mortality/survival factors.
-3) **BALANCED ASSESSMENT**: List 3 main RISK factors that increase mortality risk AND 3 main PROTECTIVE factors that support survival.
-4) Provide a brief explanation (2-3 sentences) integrating patient data with medical evidence.
-5) Make your preliminary prediction based on the evidence.
+**CLINICAL SUMMARY:**
+Briefly summarize the patient's main conditions, treatments, and clinical trajectory.
 
-CONSERVATIVE PREDICTION GUIDELINES:
-- Only predict mortality (1) if evidence STRONGLY indicates death is very likely
-- When uncertain, err toward survival prediction (0)
-- Consider both risk factors AND protective factors in your assessment
+**RISK FACTORS (that increase death risk):**
+1. [Risk factor 1]: [Brief explanation]
+2. [Risk factor 2]: [Brief explanation]  
+3. [Risk factor 3]: [Brief explanation]
 
-CRITICAL FORMAT REQUIREMENT: You MUST end your response with exactly this line:
-\\boxed{0} - if you predict SURVIVAL (patient will NOT die in next visit)
-\\boxed{1} - if you predict MORTALITY (patient WILL die in next visit)
+**PROTECTIVE FACTORS (that support survival):**
+1. [Protective factor 1]: [Brief explanation]
+2. [Protective factor 2]: [Brief explanation]
+3. [Protective factor 3]: [Brief explanation]
 
-Do not include anything after the \\boxed{} prediction.""",
+**ASSESSMENT:**
+Based on the balance of risk vs protective factors, explain your reasoning (2-3 sentences).
 
-            "mortality_risk_assessor": """You are a medical AI Risk Assessor that identifies factors that increase mortality risk.
+**PREDICTION:**
+\\boxed{0} - SURVIVAL (patient will NOT die in next visit)
+\\boxed{1} - MORTALITY (patient WILL die in next visit)""",
 
-You have access to:
-1) Similar patients with mortality outcomes (who died)
-2) Retrieved medical evidence documents (if available)
+            "mortality_risk_assessor": """You are a medical AI that analyzes mortality risk factors. Review the target patient and similar patients who died to identify key risk factors.
 
-IMPORTANT CONTEXT: You are providing risk assessment evidence. Remember that mortality is relatively rare, so focus on truly significant risk factors.
+**MORTALITY RISK ANALYSIS:**
 
-Your job (EVIDENCE ANALYSIS ONLY, NO FINAL PREDICTION):
-1) Analyze common patterns in fatal cases (diseases, procedures, medications, clinical trajectories).
-2) Review retrieved medical evidence for established mortality risk factors.
-3) Identify 3-5 key factors that clearly and significantly increase mortality risk.
-4) **CRITICAL ASSESSMENT**: Rate the strength of each risk factor (Weak/Moderate/Strong evidence).
-5) Explain (2-3 sentences) why these factors indicate increased mortality risk, supported by medical evidence.
+Based on similar patients who died and medical evidence, identify the most significant risk factors:
 
-IMPORTANT:
-- DO NOT make a final prediction.
-- DO NOT output \\boxed{0} or \\boxed{1}.
-- Your job is only to provide EVIDENCE that supports MORTALITY (death in the next visit).""",
+**HIGH-RISK FACTORS:**
+1. [Risk Factor]: [Strong/Moderate/Weak evidence] - [Why this increases death risk]
+2. [Risk Factor]: [Strong/Moderate/Weak evidence] - [Why this increases death risk]
+3. [Risk Factor]: [Strong/Moderate/Weak evidence] - [Why this increases death risk]
 
-            "protective_factor_analyst": """You are a medical AI Protective Factor Analyst that identifies factors that decrease mortality risk and support survival.
+**RISK SUMMARY:**
+Explain (2-3 sentences) how these factors collectively increase mortality risk based on the evidence from similar fatal cases.
 
-You have access to:
-1) Similar patients with survival outcomes (who survived)
-2) Retrieved medical evidence documents (if available)
+**NOTE:** Do not make final predictions - only analyze risk factors.""",
 
-IMPORTANT CONTEXT: Most patients in this population survive. Your role is to identify what factors support survival and recovery.
+            "protective_factor_analyst": """You are a medical AI that analyzes survival factors. Review the target patient and similar patients who survived to identify key protective factors.
 
-Your job (EVIDENCE ANALYSIS ONLY, NO FINAL PREDICTION):
-1) Analyze common patterns in survival cases (effective treatments, recovery trajectories, patient characteristics).
-2) Review retrieved medical evidence for established protective and survival factors.
-3) Identify 3-5 key factors that clearly support survival and decrease mortality risk.
-4) **CRITICAL ASSESSMENT**: Rate the strength of each protective factor (Weak/Moderate/Strong evidence).
-5) Explain (2-3 sentences) why these factors indicate decreased mortality risk and support survival, with medical evidence.
+**SURVIVAL FACTOR ANALYSIS:**
 
-IMPORTANT:
-- DO NOT make a final prediction.
-- DO NOT output \\boxed{0} or \\boxed{1}.
-- Your job is only to provide EVIDENCE that supports SURVIVAL (no death in the next visit).""",
+Based on similar patients who survived and medical evidence, identify the most significant protective factors:
+
+**PROTECTIVE FACTORS:**
+1. [Protective Factor]: [Strong/Moderate/Weak evidence] - [Why this supports survival]
+2. [Protective Factor]: [Strong/Moderate/Weak evidence] - [Why this supports survival]
+3. [Protective Factor]: [Strong/Moderate/Weak evidence] - [Why this supports survival]
+
+**SURVIVAL SUMMARY:**
+Explain (2-3 sentences) how these factors collectively support patient survival based on evidence from similar survival cases.
+
+**NOTE:** Do not make final predictions - only analyze protective factors.""",
 
             "balanced_clinical_integrator_mortality": """You are a medical AI Clinical Assistant analyzing MORTALITY risk for the NEXT hospital visit.
 
@@ -275,8 +267,8 @@ SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
                         'source': doc.get('source_type', 'unknown')
                     })
                 
-                # Save retrieved documents to log directory if provided (only for integrator queries)
-                if log_dir and qid and ("mortality_assessment" in qid or "survival_assessment" in qid):
+                # Save retrieved documents to log directory if provided
+                if log_dir and qid:
                     retrieval_file = Path(log_dir) / f"retrieve_{qid}.json"
                     retrieval_file.parent.mkdir(parents=True, exist_ok=True)
                     
@@ -293,8 +285,7 @@ SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
                     with open(retrieval_file, 'w', encoding='utf-8') as f:
                         json.dump(retrieval_data, f, indent=2, ensure_ascii=False)
                     
-                    print(f"[RETRIEVE] Saved {len(formatted_docs)} documents to {retrieval_file}")
-                    print(f"[RETRIEVE] Query logged to file: '{query}'")
+                    print(f"[RETRIEVE] Saved {len(formatted_docs)} documents to {retrieval_file} for query: '{query[:100]}...'")
                 
                 print(f"[RETRIEVE] Retrieved {len(formatted_docs)} documents")
                 return formatted_docs
@@ -492,10 +483,13 @@ CONCISE SUMMARY  6000 tokens max):
         
         # Extract mortality probability - handle various formats
         mortality_patterns = [
+            r'MORTALITY PROBABILITY:\s*([0-9]*\.?[0-9]+)',
             r'Mortality Probability:\s*([0-9]*\.?[0-9]+)',
             r'Final Mortality Probability:\s*([0-9]*\.?[0-9]+)', 
-            r'MORTALITY PROBABILITY:\s*([0-9]*\.?[0-9]+)',
             r'mortality\s*probability\s*:?\s*([0-9]*\.?[0-9]+)',
+            r'MORTALITY\s*PROBABILITY\s*[=:]\s*([0-9]*\.?[0-9]+)',
+            r'mortality\s*risk\s*:?\s*([0-9]*\.?[0-9]+)',
+            r'death\s*probability\s*:?\s*([0-9]*\.?[0-9]+)',
             r'\\boxed\{([0-9]*\.?[0-9]+)\}.*MORTALITY PROBABILITY',  # Handle boxed format
         ]
         for pattern in mortality_patterns:
@@ -670,6 +664,49 @@ CONCISE SUMMARY  6000 tokens max):
         if logger:
             logger.info("INTEGRATOR FUNCTION CALLED - Starting two-step prediction")
         
+        # Retry mechanism for missing probabilities
+        num_retries = 2
+        for attempt in range(num_retries):  # 0, 1 (total 2 attempts)
+            if attempt > 0:
+                print(f"\n[RETRY] Attempt {attempt + 1}/{num_retries} due to missing probabilities")
+                if logger:
+                    logger.info(f"INTEGRATOR RETRY: Attempt {attempt + 1} due to missing probabilities")
+            
+            result = self._execute_integrator_attempt(
+                patient_context, similar_patients, medical_knowledge, 
+                debate_history, logger, patient_id, log_dir
+            )
+            
+            # Check if both probabilities were extracted successfully
+            mortality_prob = result.get('mortality_probability')
+            survival_prob = result.get('survival_probability')
+            
+            if mortality_prob is not None and survival_prob is not None:
+                print(f"[SUCCESS] Both probabilities extracted: mortality={mortality_prob:.3f}, survival={survival_prob:.3f}")
+                return result
+            elif attempt < num_retries:
+                print(f"[RETRY NEEDED] Missing probabilities: mortality={mortality_prob}, survival={survival_prob}")
+            else:
+                print(f"[FINAL ATTEMPT] Using result despite missing probabilities: mortality={mortality_prob}, survival={survival_prob}")
+                return result
+        
+        return result  # Should never reach here, but safety fallback
+    
+    def _execute_integrator_attempt(self, 
+                                  patient_context: str,
+                                  similar_patients: Dict[str, str], 
+                                  medical_knowledge: str = "",
+                                  debate_history: List[Dict[str, Any]] = None,
+                                  logger = None,
+                                  patient_id: str = "unknown",
+                                  log_dir: str = None) -> Dict[str, Any]:
+        """
+        Execute a single integrator attempt (extracted from original method for retry logic).
+        
+        Returns:
+            Integrator response with mortality and survival probabilities
+        """
+        
         # Prepare context (same as regular agent turn)
         history_text = ""
         if debate_history:
@@ -701,12 +738,13 @@ Start by calling retrieve() to gather medical evidence:"""
             # Step 1a: Generate tool call for mortality assessment
             mortality_tool_response = self.integrator_llm(
                 mortality_prompt,
-                max_tokens=8192,  # Focused on tool call generation
+                max_tokens=32768,  # Focused on tool call generation
                 temperature=0.3,
                 top_p=0.9,
                 return_format='string',
                 stop_sequences=["<|im_end|>", "</s>", "End of response.", "---"],
-                repetition_penalty=1.15
+                repetition_penalty=1.15,
+                enable_thinking=True
             )
             
             # Step 1b: Parse tool call
@@ -752,12 +790,13 @@ Now provide your complete mortality probability assessment based on the retrieve
 
                 mortality_response = self.integrator_llm(
                     mortality_reasoning_prompt,
-                    max_tokens=8192,  # Conservative limit within 32k total budget
+                    max_tokens=32768,  # Conservative limit within 32k total budget
                     temperature=0.3,
                     top_p=0.9,
                     return_format='string',
                     stop_sequences=["<|im_end|>", "</s>", "SURVIVAL PROBABILITY:", "Step 2:", "End of response.", "---"],
-                    repetition_penalty=1.15
+                    repetition_penalty=1.15,
+                    enable_thinking=True
                 )
                 
                 # Combine tool call and reasoning
@@ -792,12 +831,13 @@ Start by calling retrieve() to gather medical evidence:"""
             # Step 2a: Generate tool call for survival assessment
             survival_tool_response = self.integrator_llm(
                 survival_prompt,
-                max_tokens=8192,  # Focused on tool call generation
+                max_tokens=32768,  # Focused on tool call generation
                 temperature=0.3,
                 top_p=0.9,
                 return_format='string',
                 stop_sequences=["<|im_end|>", "</s>", "End of response.", "---"],
-                repetition_penalty=1.15
+                repetition_penalty=1.15,
+                enable_thinking=True
             )
             
             # Step 2b: Parse tool call
@@ -843,12 +883,13 @@ Now provide your complete survival probability assessment based on the retrieved
 
                 survival_response = self.integrator_llm(
                     survival_reasoning_prompt,
-                    max_tokens=8192,  # Conservative limit within 32k total budget
+                    max_tokens=32768,  # Conservative limit within 32k total budget
                     temperature=0.3,
                     top_p=0.9,
                     return_format='string',
                     stop_sequences=["<|im_end|>", "</s>", "MORTALITY PROBABILITY:", "Step 1:", "End of response.", "---"],
-                    repetition_penalty=1.15
+                    repetition_penalty=1.15,
+                    enable_thinking=True
                 )
                 
                 # Combine tool call and reasoning
@@ -891,10 +932,10 @@ Now provide your complete survival probability assessment based on the retrieved
                 print(f"Manual determination: mortality_prob={mortality_prob:.3f}, survival_prob={survival_prob:.3f}")
                 print(f"Final prediction: {final_prediction} (confidence: {confidence})")
             else:
-                # Fallback: conservative default if probabilities not extracted
+                # Conservative default if probabilities still missing after retries
                 final_prediction = 0
                 confidence = "Low"
-                print(f"Missing probabilities: mortality_prob={mortality_prob}, survival_prob={survival_prob} - defaulting to survival (0)")
+                print(f"Missing probabilities after retries: mortality_prob={mortality_prob}, survival_prob={survival_prob} - conservative default to survival (0)")
             
             # Combine both responses with tool call information (with safe formatting)
             try:
@@ -1141,9 +1182,9 @@ Provide your clinical analysis and mortality risk assessment:"""
             # Set token limits based on debate round and role
             # Note: max_tokens is for generation (new tokens), not input context window
             if role == "target_patient_analyst":
-                max_tokens = 8192  # Round 1: Comprehensive target analysis with full context
+                max_tokens = 32768  # Round 1: Comprehensive target analysis with full context
             elif role in ["mortality_risk_assessor", "protective_factor_analyst"]:
-                max_tokens = 8192  # Round 2: Detailed comparison analysis with full similar patient context
+                max_tokens = 32768  # Round 2: Detailed comparison analysis with full similar patient context
             else:  # balanced_clinical_integrator
                 # Round 3: Can handle ~5-10k tokens input + generate comprehensive reasoning  
                 # Model context window (32768) - input tokens (~8k) = ~24k available for generation
@@ -1165,10 +1206,37 @@ Provide your clinical analysis and mortality risk assessment:"""
                 top_p=0.9,
                 return_format='string',  # Ensure we get a string response
                 stop_sequences=["<|im_end|>", "</s>", "End of response.", "---"],  # Remove boxed stop sequences to allow completion
-                repetition_penalty=1.15  # Add repetition penalty for better generation quality
+                repetition_penalty=1.15,  # Add repetition penalty for better generation quality
+                enable_thinking=True
             )
             
             generation_time = time.time() - start_time
+            
+            # Validate response quality and retry if needed
+            if not response:
+                print(f"[ERROR] {role} produced empty short response - attempting retry")
+                if logger:
+                    logger.error(f"{role} produced empty/very short response: {response}")
+                
+                # Single retry with different parameters
+                try:
+                    print(f"[RETRY] Regenerating response for {role} with adjusted parameters...")
+                    response = selected_llm(
+                        prompt,
+                        max_tokens=max_tokens,
+                        temperature=0.8,  # Increase temperature for more creativity
+                        top_p=0.95,       # Increase top_p for more diversity
+                        return_format='string',
+                        stop_sequences=["<|im_end|>", "</s>"],  # Simplified stop sequences
+                        repetition_penalty=1.2,  # Higher repetition penalty
+                        enable_thinking=True
+                    )
+                    print(f"[RETRY] Generated response length: {len(response) if response else 0} chars")
+                except Exception as retry_error:
+                    print(f"[RETRY ERROR] Failed to regenerate response for {role}: {retry_error}")
+                    if not response:  # If still no response, create minimal fallback
+                        response = f"Analysis completed for {role}. Unable to generate detailed response due to technical issues."
+                    
             
             # Log raw response for debugging
             log_message = f"\n{'='*50}\nRAW RESPONSE from {role.upper()}\n{'='*50}\nResponse type: {type(response)}\nResponse length: {len(response) if response else 0}\nFull response: {response}\n{'='*50}"
@@ -1259,8 +1327,8 @@ Provide your clinical analysis and mortality risk assessment:"""
         # Use absolute paths to ensure consistency regardless of working directory
         if output_dir:
             # If output_dir is provided, create logs in the same parent directory
-            output_path = Path(output_dir)
-            if output_path.is_file() or output_path.suffix == '.json':
+            output_path = Path(output_dir).resolve()  # Convert to absolute path
+            if output_path.is_file() or output_path.suffix in ['.json', '.log', '.txt']:
                 # output_dir is actually a file path, use its parent directory
                 log_dir = output_path.parent / "debate_logs"
             else:
@@ -1285,7 +1353,8 @@ Provide your clinical analysis and mortality risk assessment:"""
             log_dir = Path(tempfile.mkdtemp(prefix=f"debate_logs_{clean_model_name}_"))
             print(f"Using fallback log directory: {log_dir}")
         
-        print(f"RAG Debug: Output dir parameter: {output_dir}")
+        print(f"Log directory created: {log_dir}")
+        print(f"Output dir parameter: {output_dir}")
         
         # Create patient-specific log file
         log_filename = log_dir / f"debate_responses_{patient_id}.log"
@@ -1419,12 +1488,11 @@ Provide your clinical analysis and mortality risk assessment:"""
             logger.info(f"Final Confidence Level: {final_confidence}")
         logger.info(f"Debate history: {len(debate_history)} rounds completed")
         
-        # Clean up handlers - check if file_handler exists
-        for handler in logger.handlers:
+        # Clean up handlers - properly close file handlers
+        for handler in logger.handlers[:]:
             if isinstance(handler, logging.FileHandler):
                 handler.close()
-                logger.removeHandler(handler)
-                break
+            logger.removeHandler(handler)
         
         return {
             'final_prediction': final_prediction,
