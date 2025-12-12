@@ -9,6 +9,7 @@ import sys
 import json
 import re
 import time
+import logging
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 
@@ -22,6 +23,7 @@ sys.path.insert(0, mirage_src)
 
 from run_medrag_vllm import VLLMWrapper, patch_medrag_for_vllm
 from medrag import MedRAG
+from vllm import SamplingParams
 
 class MortalityDebateSystem:
     """
@@ -77,7 +79,8 @@ class MortalityDebateSystem:
                 corpus_name=corpus_name,
                 db_dir=db_dir,
                 corpus_cache=True,
-                HNSW=True
+                HNSW=True,
+                retriever_device=f"cuda:{self.main_gpu}"
             )
             # Create retrieval tools for each round
             self.retrieval_tools = {
@@ -1043,6 +1046,197 @@ Based on the separate tool-assisted assessments:
                 'error': str(e)
             }
     
+    def _agent_turn_batch(self,
+                         roles: List[str],
+                         patient_context: str,
+                         similar_patients: Dict[str, str],
+                         medical_knowledge: str = "",
+                         debate_history: List[Dict[str, Any]] = None,
+                         logger = None,
+                         patient_id: str = "unknown",
+                         log_dir: str = None) -> List[Dict[str, Any]]:
+        """
+        Execute multiple agent turns in parallel using VLLM batch generation.
+        
+        Args:
+            roles: List of agent role identifiers
+            patient_context: Target patient's EHR context
+            similar_patients: Similar patient contexts
+            medical_knowledge: Retrieved medical knowledge (optional)
+            debate_history: Previous debate messages
+            logger: Logger instance
+            patient_id: Patient identifier
+            log_dir: Log directory path
+            
+        Returns:
+            List of agent response dictionaries (one per role)
+        """
+        print(f"\n--- BATCH PROCESSING {len(roles)} AGENTS ---")
+        
+        prompts = []
+        agent_configs = []
+        
+        # Build prompts for each agent
+        for role in roles:
+            print(f"Building prompt for {role.upper()}...")
+            
+            # Get system prompt for this role
+            system_prompt = self.agent_prompts.get(role, self.agent_prompts["target_patient_analyst"])
+            
+            # Format debate history (only for agents that use it)
+            history_text = ""
+            if debate_history and role not in ["mortality_risk_assessor", "protective_factor_analyst"]:
+                history_text = "\n## Previous Debate Rounds:\n"
+                for i, entry in enumerate(debate_history):
+                    agent_name = entry.get('role', f'Agent {i+1}')
+                    message = entry.get('message', '')
+                    if len(message) > 500:
+                        message = message[:500] + "..."
+                    history_text += f"\n### {agent_name}:\n{message}\n"
+            
+            # Perform retrieval if RAG is enabled
+            retrieved_docs = []
+            retrieval_context = ""
+            if self.rag_enabled and role in ["target_patient_analyst", "mortality_risk_assessor", "protective_factor_analyst", "balanced_clinical_integrator"]:
+                try:
+                    # Use appropriate retrieval tool for current round
+                    retrieval_tool = self.retrieval_tools.get("round2", None)
+                    if retrieval_tool:
+                        retrieval_func = retrieval_tool["func"]
+                        
+                        # Create agent-specific retrieval query
+                        if role == "mortality_risk_assessor":
+                            retrieval_query = f"mortality risk factors complications death prognosis {patient_context[:200]}"
+                        elif role == "protective_factor_analyst":
+                            retrieval_query = f"survival protective factors recovery positive outcomes {patient_context[:200]}"
+                        else:
+                            retrieval_query = patient_context[:300]
+                        
+                        retrieved_docs = retrieval_func(retrieval_query, qid=patient_id, log_dir=log_dir)
+                        
+                        if retrieved_docs:
+                            retrieval_context = "\n## Retrieved Medical Evidence:\n"
+                            for idx, doc in enumerate(retrieved_docs[:8]):
+                                retrieval_context += f"\n[Evidence {idx+1}]: {doc.get('content', '')[:400]}...\n"
+                except Exception as e:
+                    print(f"Warning: Retrieval failed for {role}: {e}")
+            
+            # Build context based on agent role
+            if role == "target_patient_analyst":
+                primary_context = f"## Target Patient EHR Context ##\n{patient_context}"
+                secondary_context = ""
+            elif role == "mortality_risk_assessor":
+                primary_context = f"## Target Patient EHR Context ##\n{patient_context}"
+                secondary_context = f"\n## Similar Mortality Cases ##\n{similar_patients.get('positive', 'None')}"
+            elif role == "protective_factor_analyst":
+                primary_context = f"## Target Patient EHR Context ##\n{patient_context}"
+                secondary_context = f"\n## Similar Survival Cases ##\n{similar_patients.get('negative', 'None')}"
+            else:
+                primary_context = f"## Target Patient EHR Context ##\n{patient_context}"
+                secondary_context = f"\n## Mortality Risk Cases ##\n{similar_patients.get('positive', 'None')}"
+                secondary_context += f"\n## Survival Cases ##\n{similar_patients.get('negative', 'None')}"
+            
+            # Build full prompt
+            prompt = f"""{system_prompt}
+
+{primary_context}{secondary_context}
+
+{retrieval_context}{history_text}
+
+Provide your clinical analysis and mortality risk assessment:"""
+            
+            prompts.append(prompt)
+            agent_configs.append({
+                'role': role,
+                'prompt_length': len(prompt)
+            })
+            
+            print(f"Context Length for {role}: {len(prompt)} characters")
+            if logger:
+                logger.info(f"Context Length for {role}: {len(prompt)} characters")
+        
+        # Generate responses in batch
+        try:
+            start_time = time.time()
+            
+            # Determine temperature and max_tokens (should be same for all agents in batch)
+            temperature = 0.3  # Both Round 2 agents use same temperature
+            max_tokens = 32768
+            
+            # Use main LLM for batch generation
+            selected_llm = self.llm
+            
+            print(f"Generating batch responses for {len(roles)} agents...")
+            
+            # Create sampling params for batch generation
+            sampling_params = SamplingParams(
+                temperature=temperature,
+                top_p=0.9,
+                max_tokens=max_tokens,
+                stop=["<|im_end|>", "</s>", "End of response.", "---"],
+                repetition_penalty=1.15
+            )
+            
+            # VLLM batch generation with single sampling params
+            responses = selected_llm.llm.generate(prompts, sampling_params)
+            
+            generation_time = time.time() - start_time
+            print(f"Batch generation completed in {generation_time:.2f}s")
+            
+            # Parse responses and create result dictionaries
+            results = []
+            for i, (response_output, config) in enumerate(zip(responses, agent_configs)):
+                role = config['role']
+                response_text = response_output.outputs[0].text
+                
+                # Log raw response
+                log_message = f"\n{'='*50}\nBATCH RESPONSE from {role.upper()}\n{'='*50}\nResponse length: {len(response_text)}\nFull response: {response_text}\n{'='*50}"
+                if logger:
+                    logger.info(log_message)
+                
+                # Extract prediction and probabilities (agents 2&3 shouldn't have predictions)
+                extraction_result = self._extract_prediction_and_probabilities(response_text)
+                prediction = extraction_result.get('prediction') if isinstance(extraction_result, dict) else None
+                mortality_prob = extraction_result.get('mortality_probability') if isinstance(extraction_result, dict) else None
+                survival_prob = extraction_result.get('survival_probability') if isinstance(extraction_result, dict) else None
+                confidence = extraction_result.get('confidence') if isinstance(extraction_result, dict) else None
+                
+                results.append({
+                    'role': role,
+                    'message': response_text,
+                    'prediction': prediction if role not in ["mortality_risk_assessor", "protective_factor_analyst"] else None,
+                    'mortality_probability': mortality_prob,
+                    'survival_probability': survival_prob,
+                    'confidence': confidence,
+                    'generation_time': generation_time / len(roles),  # Approximate time per agent
+                    'prompt_length': config['prompt_length'],
+                    'response_length': len(response_text)
+                })
+            
+            return results
+            
+        except Exception as e:
+            print(f"[ERROR] Batch generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Fallback to sequential generation
+            print("[FALLBACK] Using sequential generation...")
+            results = []
+            for role in roles:
+                result = self._agent_turn(
+                    role=role,
+                    patient_context=patient_context,
+                    similar_patients=similar_patients,
+                    medical_knowledge=medical_knowledge,
+                    debate_history=debate_history,
+                    logger=logger,
+                    patient_id=patient_id,
+                    log_dir=log_dir
+                )
+                results.append(result)
+            return results
+    
     def _agent_turn(self, 
                    role: str, 
                    patient_context: str, 
@@ -1432,12 +1626,12 @@ Provide your clinical analysis and mortality risk assessment:"""
         print(f"Target Analysis: {target_response.get('message', 'No response')[:200]}...")
         print(f"Initial Prediction: {target_response.get('prediction')}")
         
-        # Round 2: Similar Patient Comparisons
-        print(f"\n--- ROUND 2: SIMILAR PATIENT COMPARISONS ---")
+        # Round 2: Similar Patient Comparisons (PARALLEL BATCH PROCESSING)
+        print(f"\n--- ROUND 2: SIMILAR PATIENT COMPARISONS (BATCH) ---")
         
-        # Mortality risk assessor
-        positive_response = self._agent_turn(
-            role="mortality_risk_assessor",
+        # Process both agents in parallel using batch generation
+        round2_responses = self._agent_turn_batch(
+            roles=["mortality_risk_assessor", "protective_factor_analyst"],
             patient_context=patient_context,
             similar_patients=similar_patients_dict,
             medical_knowledge=medical_knowledge,
@@ -1446,21 +1640,16 @@ Provide your clinical analysis and mortality risk assessment:"""
             patient_id=patient_id,
             log_dir=str(log_dir)
         )
+        
+        # Extract individual responses
+        positive_response = round2_responses[0]  # mortality_risk_assessor
+        negative_response = round2_responses[1]  # protective_factor_analyst
+        
+        # Add to debate history
         debate_history.append(positive_response)
-        print(f"Risk Assessor: {positive_response.get('message', 'No response')[:200]}...")
-        
-        # Protective factor analyst  
-        negative_response = self._agent_turn(
-            role="protective_factor_analyst",
-            patient_context=patient_context,
-            similar_patients=similar_patients_dict,
-            medical_knowledge=medical_knowledge,
-            debate_history=debate_history,
-            logger=logger,
-            patient_id=patient_id,
-            log_dir=str(log_dir)
-        )
         debate_history.append(negative_response)
+        
+        print(f"Risk Assessor: {positive_response.get('message', 'No response')[:200]}...")
         print(f"Protective Factor Analyst: {negative_response.get('message', 'No response')[:200]}...")
         
         # Round 3: Integration and Final Consensus
@@ -1479,22 +1668,74 @@ Provide your clinical analysis and mortality risk assessment:"""
         print(f"Clinical Integrator: {integrator_response.get('message', 'No response')[:200]}...")
         print(f"Final Prediction: {integrator_response.get('prediction')}")
         
-        # Use integrator's prediction as the final result (no fallback to consensus)
+        # Use integrator's prediction as the final result with improved fallback logic
         final_prediction = integrator_response.get('prediction')
         final_mortality_prob = integrator_response.get('mortality_probability')
         final_survival_prob = integrator_response.get('survival_probability')
         final_confidence = integrator_response.get('confidence')
         
-        # Only fallback to target if integrator completely fails
-        if final_prediction is None:
-            print("Warning: No prediction from final integrator, using target prediction as fallback")
-            final_prediction = target_response.get('prediction')
-            final_mortality_prob = target_response.get('mortality_probability')
-            final_survival_prob = target_response.get('survival_probability')
-            final_confidence = target_response.get('confidence')
-            if final_prediction is None:
-                print("Warning: No prediction from any agent, final answer is None")
-                final_prediction = None
+        # Improved fallback: if integrator fails to output probabilities, re-run Round 2 agents
+        if final_mortality_prob is None and final_survival_prob is None:
+            print("[WARNING] Integrator failed to produce probabilities, re-running Round 2 agents...")
+            if logger:
+                logger.warning("Integrator produced no probabilities - re-running Round 2 agents")
+            
+            # Re-run Round 2 agents in batch
+            retry_responses = self._agent_turn_batch(
+                roles=["mortality_risk_assessor", "protective_factor_analyst"],
+                patient_context=patient_context,
+                similar_patients=similar_patients_dict,
+                medical_knowledge=medical_knowledge,
+                debate_history=debate_history[:1],  # Only include Round 1 for fresh perspective
+                logger=logger,
+                patient_id=patient_id,
+                log_dir=str(log_dir)
+            )
+            
+            retry_positive = retry_responses[0]
+            retry_negative = retry_responses[1]
+            
+            # Check if either agent produced probabilities
+            retry_mort_prob = retry_positive.get('mortality_probability') or retry_negative.get('mortality_probability')
+            retry_surv_prob = retry_positive.get('survival_probability') or retry_negative.get('survival_probability')
+            
+            if retry_mort_prob is not None and retry_mort_prob > 0.5:
+                # Mortality probability > 0.5, predict death
+                final_prediction = 1
+                final_mortality_prob = retry_mort_prob
+                print(f"[FALLBACK] Using mortality probability {retry_mort_prob:.3f} -> prediction: 1")
+                if logger:
+                    logger.info(f"Fallback: mortality_prob={retry_mort_prob:.3f} > 0.5, prediction=1")
+            elif retry_surv_prob is not None and retry_surv_prob > 0.5:
+                # Survival probability > 0.5, predict survival
+                final_prediction = 0
+                final_survival_prob = retry_surv_prob
+                print(f"[FALLBACK] Using survival probability {retry_surv_prob:.3f} -> prediction: 0")
+                if logger:
+                    logger.info(f"Fallback: survival_prob={retry_surv_prob:.3f} > 0.5, prediction=0")
+            elif retry_mort_prob is not None:
+                # Has mortality prob <= 0.5, take opposite (survival)
+                final_prediction = 0
+                final_mortality_prob = retry_mort_prob
+                print(f"[FALLBACK] Mortality probability {retry_mort_prob:.3f} <= 0.5 -> prediction: 0")
+                if logger:
+                    logger.info(f"Fallback: mortality_prob={retry_mort_prob:.3f} <= 0.5, prediction=0")
+            elif retry_surv_prob is not None:
+                # Has survival prob <= 0.5, take opposite (mortality)
+                final_prediction = 1
+                final_survival_prob = retry_surv_prob
+                print(f"[FALLBACK] Survival probability {retry_surv_prob:.3f} <= 0.5 -> prediction: 1")
+                if logger:
+                    logger.info(f"Fallback: survival_prob={retry_surv_prob:.3f} <= 0.5, prediction=1")
+            else:
+                # Still no probabilities, use target analyst as final fallback
+                print("[FALLBACK] Still no probabilities from retry, using target analyst prediction")
+                final_prediction = target_response.get('prediction')
+                final_mortality_prob = target_response.get('mortality_probability')
+                final_survival_prob = target_response.get('survival_probability')
+                final_confidence = target_response.get('confidence')
+                if logger:
+                    logger.warning("Double fallback - using target analyst prediction")
         
         print(f"\n{'='*80}")
         print(f"DEBATE COMPLETED - Final Prediction: {final_prediction}")
