@@ -756,7 +756,7 @@ CONCISE SUMMARY  6000 tokens max):
             logger.info("INTEGRATOR STEP 1: Starting mortality assessment")
         mortality_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_mortality"]}
 
-{primary_context}{secondary_context}
+{primary_context}
 
 ## Previous Debate Analysis ##
 {history_text}
@@ -807,7 +807,7 @@ Start by calling retrieve() to gather medical evidence:"""
                 # Step 1c: Generate full reasoning with retrieved context
                 mortality_reasoning_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_mortality"]}
 
-{primary_context}{secondary_context}
+{primary_context}
 
 ## Previous Debate Analysis ##
 {history_text}
@@ -852,7 +852,7 @@ Now provide your complete mortality probability assessment based on the retrieve
                 logger.info("INTEGRATOR STEP 2: Starting survival assessment")
             survival_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_survival"]}
 
-{primary_context}{secondary_context}
+{primary_context}
 
 ## Previous Debate Analysis ##
 {history_text}
@@ -900,7 +900,7 @@ Start by calling retrieve() to gather medical evidence:"""
                 # Step 2c: Generate full reasoning with retrieved context
                 survival_reasoning_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_survival"]}
 
-{primary_context}{secondary_context}
+{primary_context}
 
 ## Previous Debate Analysis ##
 {history_text}

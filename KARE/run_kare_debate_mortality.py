@@ -128,6 +128,75 @@ def calculate_metrics(results: List[Dict[str, Any]]) -> Dict[str, float]:
         'gt_distribution': {'0': gt_0_count, '1': gt_1_count}
     }
 
+def load_existing_results(output_path: str) -> tuple[List[Dict[str, Any]], set]:
+    """
+    Load existing results from JSON file and return processed patient IDs.
+    
+    Args:
+        output_path: Path to existing results file
+        
+    Returns:
+        Tuple of (existing_results_list, set_of_processed_patient_ids)
+    """
+    if not os.path.exists(output_path):
+        return [], set()
+    
+    try:
+        with open(output_path, 'r') as f:
+            data = json.load(f)
+        
+        existing_results = data.get('results', [])
+        processed_ids = {result['patient_id'] for result in existing_results if result.get('patient_id')}
+        
+        print(f"Loaded {len(existing_results)} existing results ({len(processed_ids)} unique patients)")
+        return existing_results, processed_ids
+    except Exception as e:
+        print(f"Warning: Could not load existing results: {e}")
+        return [], set()
+
+def get_processed_patients_from_logs(output_path: str, model_name: str) -> set:
+    """
+    Check debate_logs directory for already processed patients.
+    
+    Args:
+        output_path: Output file path (used to determine log directory)
+        model_name: Model name for log directory structure
+        
+    Returns:
+        Set of processed patient IDs
+    """
+    if not output_path:
+        return set()
+    
+    # Determine log directory from output path
+    output_dir = Path(output_path).parent
+    log_dir = output_dir / "debate_logs"
+    
+    if not log_dir.exists():
+        return set()
+    
+    processed_ids = set()
+    
+    # Scan for patient log files
+    # Format: patient_{patient_id}_round*.json
+    try:
+        for log_file in log_dir.glob("patient_*_round*.json"):
+            # Extract patient_id from filename
+            filename = log_file.stem
+            parts = filename.split('_')
+            if len(parts) >= 2:
+                # Handle format: patient_{id}_round{n}
+                # Patient ID might contain underscores (e.g., 10188_1)
+                patient_id = '_'.join(parts[1:-1])  # Everything between 'patient' and 'roundX'
+                processed_ids.add(patient_id)
+    except Exception as e:
+        print(f"Warning: Error scanning log directory: {e}")
+    
+    if processed_ids:
+        print(f"Found {len(processed_ids)} patients in debate logs")
+    
+    return processed_ids
+
 def save_results(results: List[Dict[str, Any]], 
                 metrics: Dict[str, float],
                 output_path: str,
@@ -220,6 +289,16 @@ def run_kare_debate_evaluation(start_idx: int = 0,
     """
     print("Initializing KARE Multi-Agent Debate Evaluation...")
     
+    # Load existing results and check for already processed patients
+    existing_results, processed_from_json = load_existing_results(output_path) if output_path else ([], set())
+    processed_from_logs = get_processed_patients_from_logs(output_path, model_name) if output_path else set()
+    processed_patients = processed_from_json | processed_from_logs
+    
+    if processed_patients:
+        print(f"Found {len(processed_patients)} already processed patients (will skip these)")
+        print(f"  - From results JSON: {len(processed_from_json)}")
+        print(f"  - From debate logs: {len(processed_from_logs)}")
+    
     # Initialize components
     try:
         print("Loading KARE data adapter...")
@@ -272,8 +351,9 @@ def run_kare_debate_evaluation(start_idx: int = 0,
     print(f"Dataset statistics: {data_adapter.get_statistics()}")
     
     # Process samples
-    results = []
+    results = existing_results.copy()  # Start with existing results
     error_count = 0
+    skipped_count = 0
     
     try:
         with tqdm(range(start_idx, end_idx), desc="Processing samples", ncols=100) as pbar:
@@ -281,6 +361,17 @@ def run_kare_debate_evaluation(start_idx: int = 0,
                 try:
                     # Get sample data
                     sample = data_adapter.get_test_sample(i)
+                    
+                    # Skip if already processed
+                    if sample['patient_id'] in processed_patients:
+                        skipped_count += 1
+                        pbar.set_postfix({
+                            'Patient': sample['patient_id'],
+                            'Status': 'SKIPPED',
+                            'Skipped': skipped_count,
+                            'Errors': error_count
+                        })
+                        continue
                     
                     # Debug: Check similar patients data length
                     if i < 3:  # Only debug first few samples
@@ -293,6 +384,7 @@ def run_kare_debate_evaluation(start_idx: int = 0,
                     pbar.set_postfix({
                         'Patient': sample['patient_id'],
                         'GT': sample['ground_truth'],
+                        'Skipped': skipped_count,
                         'Errors': error_count
                     })
                     
@@ -384,7 +476,7 @@ def run_kare_debate_evaluation(start_idx: int = 0,
                 import traceback
                 traceback.print_exc()
     
-    print(f"\nEvaluation completed. Processed {len(results)} samples with {error_count} errors.")
+    print(f"\nEvaluation completed. Total results: {len(results)}, Skipped: {skipped_count}, Errors: {error_count}")
     
     # Calculate and print final metrics
     if results:
