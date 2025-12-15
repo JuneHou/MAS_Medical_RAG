@@ -154,48 +154,7 @@ def load_existing_results(output_path: str) -> tuple[List[Dict[str, Any]], set]:
         print(f"Warning: Could not load existing results: {e}")
         return [], set()
 
-def get_processed_patients_from_logs(output_path: str, model_name: str) -> set:
-    """
-    Check debate_logs directory for already processed patients.
-    
-    Args:
-        output_path: Output file path (used to determine log directory)
-        model_name: Model name for log directory structure
-        
-    Returns:
-        Set of processed patient IDs
-    """
-    if not output_path:
-        return set()
-    
-    # Determine log directory from output path
-    output_dir = Path(output_path).parent
-    log_dir = output_dir / "debate_logs"
-    
-    if not log_dir.exists():
-        return set()
-    
-    processed_ids = set()
-    
-    # Scan for patient log files
-    # Format: patient_{patient_id}_round*.json
-    try:
-        for log_file in log_dir.glob("patient_*_round*.json"):
-            # Extract patient_id from filename
-            filename = log_file.stem
-            parts = filename.split('_')
-            if len(parts) >= 2:
-                # Handle format: patient_{id}_round{n}
-                # Patient ID might contain underscores (e.g., 10188_1)
-                patient_id = '_'.join(parts[1:-1])  # Everything between 'patient' and 'roundX'
-                processed_ids.add(patient_id)
-    except Exception as e:
-        print(f"Warning: Error scanning log directory: {e}")
-    
-    if processed_ids:
-        print(f"Found {len(processed_ids)} patients in debate logs")
-    
-    return processed_ids
+
 
 def save_results(results: List[Dict[str, Any]], 
                 metrics: Dict[str, float],
@@ -289,15 +248,11 @@ def run_kare_debate_evaluation(start_idx: int = 0,
     """
     print("Initializing KARE Multi-Agent Debate Evaluation...")
     
-    # Load existing results and check for already processed patients
-    existing_results, processed_from_json = load_existing_results(output_path) if output_path else ([], set())
-    processed_from_logs = get_processed_patients_from_logs(output_path, model_name) if output_path else set()
-    processed_patients = processed_from_json | processed_from_logs
+    # Load existing results and check for already processed patients (only from results.json)
+    existing_results, processed_patients = load_existing_results(output_path) if output_path else ([], set())
     
     if processed_patients:
-        print(f"Found {len(processed_patients)} already processed patients (will skip these)")
-        print(f"  - From results JSON: {len(processed_from_json)}")
-        print(f"  - From debate logs: {len(processed_from_logs)}")
+        print(f"Found {len(processed_patients)} already processed patients from results.json (will skip these)")
     
     # Initialize components
     try:

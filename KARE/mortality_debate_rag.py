@@ -86,7 +86,7 @@ class MortalityDebateSystem:
             self.retrieval_tools = {
                 "round1": self._create_retrieval_tool(k=8),
                 "round2": self._create_retrieval_tool(k=8), 
-                "round3": self._create_retrieval_tool(k=16)
+                "round3": self._create_retrieval_tool(k=8)
             }
             print("MedRAG initialization complete.")
         else:
