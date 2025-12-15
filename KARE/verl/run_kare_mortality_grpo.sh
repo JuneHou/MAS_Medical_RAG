@@ -12,8 +12,8 @@ set -x
 # ==============================================================================
 
 # Data paths
-train_path=/data/wang/junh/githubs/Debate/KARE/verl/data_generation/mortality_grpo_data_hard/train.parquet
-test_path=/data/wang/junh/githubs/Debate/KARE/verl/data_generation/mortality_grpo_data_hard/test.parquet
+train_path=/data/wang/junh/githubs/Debate/KARE/verl/data_generation/survival_grpo_data_hard/train.parquet
+test_path=/data/wang/junh/githubs/Debate/KARE/verl/data_generation/survival_grpo_data_hard/test.parquet
 
 # Output paths
 checkpoint_dir=/data/wang/junh/githubs/Debate/KARE/verl/checkpoints
@@ -46,7 +46,7 @@ python3 -m verl.trainer.main_ppo \
     data.max_response_length=4096 \
     data.filter_overlong_prompts=False \
     data.truncation='error' \
-    actor_rollout_ref.model.path=Qwen/Qwen2.5-7B-Instruct \
+    actor_rollout_ref.model.path=/data/wang/junh/githubs/Debate/KARE/verl/models/format_enforcer_7b_step57 \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=4 \
@@ -69,12 +69,12 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.use_kl_in_reward=False \
-    custom_reward_function.path=/data/wang/junh/githubs/Debate/KARE/verl/reward_score/kare_mortality_format.py \
+    custom_reward_function.path=/data/wang/junh/githubs/Debate/KARE/verl/reward_score/kare_survival_format.py \
     custom_reward_function.name=compute_score \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='verl-kare-mortality-format' \
-    trainer.experiment_name='grpo-qwen2.5-7b-it-format' \
+    trainer.experiment_name='grpo-qwen2.5-7b-survival-format' \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.save_freq=50 \
@@ -82,7 +82,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.total_epochs=3 \
     trainer.default_hdfs_dir=null \
     trainer.default_local_dir=$checkpoint_dir \
-    trainer.resume_mode=disable
+    trainer.resume_mode=disable  # Starting new survival training from mortality checkpoint
 
 echo "Training completed! Checkpoints saved to: $checkpoint_dir"
 echo "Logs saved to: $log_dir"

@@ -27,7 +27,8 @@ class TrainingDataGenerator:
         primary_debate_dir: str,
         fallback_debate_dir: str,
         output_dir: str,
-        hard_mode: bool = False
+        hard_mode: bool = False,
+        class_type: str = "mortality"
     ):
         """
         Initialize generator.
@@ -37,10 +38,17 @@ class TrainingDataGenerator:
             primary_debate_dir: Primary debate logs directory
             fallback_debate_dir: Fallback debate logs directory
             output_dir: Output directory for parquet files
+            hard_mode: If True, only use samples with format extraction failures
+            class_type: Either 'mortality' or 'survival' - determines prompt format
         """
         self.ehr_file = ehr_file
         self.output_dir = output_dir
         self.hard_mode = hard_mode
+        self.class_type = class_type.lower()
+        
+        # Validate class_type
+        if self.class_type not in ["mortality", "survival"]:
+            raise ValueError(f"class_type must be 'mortality' or 'survival', got: {class_type}")
         
         # Initialize parsers
         self.debate_parser = DebateLogParser(primary_debate_dir, fallback_debate_dir)
@@ -160,8 +168,9 @@ class TrainingDataGenerator:
         """
         prompt_parts = []
         
-        # System prompt (from mortality_debate_rag.py)
-        system_prompt = """You are a medical AI Clinical Assistant analyzing MORTALITY risk for hospital patients. Your task is to provide a probability assessment for whether the patient will die during their NEXT hospital visit.
+        # System prompt - different for mortality vs survival
+        if self.class_type == "mortality":
+            system_prompt = """You are a medical AI Clinical Assistant analyzing MORTALITY risk for hospital patients. Your task is to provide a probability assessment for whether the patient will die during their NEXT hospital visit.
 
 CRITICAL OUTPUT REQUIREMENT:
 You MUST end your response with exactly this format:
@@ -172,6 +181,20 @@ Guidelines:
 - 0.00 = Definitely will survive
 - 0.50 = Uncertain/Equal risk
 - 1.00 = Definitely will die
+
+Provide comprehensive clinical reasoning analyzing ALL available evidence, then conclude with the required probability format."""
+        else:  # survival
+            system_prompt = """You are a medical AI Clinical Assistant analyzing SURVIVAL probability for hospital patients. Your task is to provide a probability assessment for whether the patient will survive their NEXT hospital visit.
+
+CRITICAL OUTPUT REQUIREMENT:
+You MUST end your response with exactly this format:
+SURVIVAL PROBABILITY: X.XX
+where X.XX is a number between 0.00 and 1.00
+
+Guidelines:
+- 0.00 = Definitely will die
+- 0.50 = Uncertain/Equal risk
+- 1.00 = Definitely will survive
 
 Provide comprehensive clinical reasoning analyzing ALL available evidence, then conclude with the required probability format."""
         
@@ -206,8 +229,12 @@ Provide comprehensive clinical reasoning analyzing ALL available evidence, then 
         
         # Final instruction
         prompt_parts.append("# Task")
-        prompt_parts.append("Based on all the evidence above, provide your comprehensive mortality risk assessment.")
-        prompt_parts.append("You MUST conclude with: MORTALITY PROBABILITY: X.XX (where X.XX is between 0.00 and 1.00)")
+        if self.class_type == "mortality":
+            prompt_parts.append("Based on all the evidence above, provide your comprehensive mortality risk assessment.")
+            prompt_parts.append("You MUST conclude with: MORTALITY PROBABILITY: X.XX (where X.XX is between 0.00 and 1.00)")
+        else:  # survival
+            prompt_parts.append("Based on all the evidence above, provide your comprehensive survival probability assessment.")
+            prompt_parts.append("You MUST conclude with: SURVIVAL PROBABILITY: X.XX (where X.XX is between 0.00 and 1.00)")
         
         return "\n".join(prompt_parts)
     
@@ -351,6 +378,8 @@ def main():
     parser = argparse.ArgumentParser(description="Generate GRPO training data")
     parser.add_argument("--hard", action="store_true", 
                         help="Hard mode: only include samples where format extraction failed")
+    parser.add_argument("--class_type", type=str, default="mortality", choices=["mortality", "survival"],
+                        help="Type of probability to predict: 'mortality' or 'survival' (default: mortality)")
     args = parser.parse_args()
     
     # Paths
@@ -358,13 +387,14 @@ def main():
     primary_debate_dir = "/data/wang/junh/githubs/Debate/KARE/results/arc_rag_mor_Qwen_Qwen2.5_7B_Instruct_int_Qwen_Qwen2.5_32B_Instruct_8_8"
     fallback_debate_dir = "/data/wang/junh/githubs/Debate/KARE/results/fallback_rag_mor_Qwen_Qwen2.5_7B_Instruct_8_8"
     
-    # Set output directory based on mode
+    # Set output directory based on mode and class_type
+    base_dir = f"/data/wang/junh/githubs/Debate/KARE/verl/data_generation/{args.class_type}_grpo_data"
     if args.hard:
-        output_dir = "/data/wang/junh/githubs/Debate/KARE/verl/data_generation/mortality_grpo_data_hard"
-        print("🔥 HARD MODE: Only samples with format extraction failures")
+        output_dir = f"{base_dir}_hard"
+        print(f"🔥 HARD MODE: Only samples with format extraction failures ({args.class_type.upper()})")
     else:
-        output_dir = "/data/wang/junh/githubs/Debate/KARE/verl/data_generation/mortality_grpo_data"
-        print("📋 STANDARD MODE: All samples")
+        output_dir = base_dir
+        print(f"📋 STANDARD MODE: All samples ({args.class_type.upper()})")
     
     # Create generator
     generator = TrainingDataGenerator(
@@ -372,7 +402,8 @@ def main():
         primary_debate_dir=primary_debate_dir,
         fallback_debate_dir=fallback_debate_dir,
         output_dir=output_dir,
-        hard_mode=args.hard
+        hard_mode=args.hard,
+        class_type=args.class_type
     )
     
     # Test on single sample first
@@ -392,9 +423,9 @@ def main():
         # Generate full dataset
         print("\n" + "="*80)
         if args.hard:
-            print("Generating HARD dataset (format extraction failures)...")
+            print(f"Generating HARD {args.class_type.upper()} dataset (format extraction failures)...")
         else:
-            print("Generating STANDARD dataset (all available samples)...")
+            print(f"Generating STANDARD {args.class_type.upper()} dataset (all available samples)...")
         print("="*80 + "\n")
         generator.generate_dataset(num_samples=999, train_ratio=0.8)
     else:

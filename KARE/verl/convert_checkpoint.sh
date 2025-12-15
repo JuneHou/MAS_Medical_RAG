@@ -7,7 +7,7 @@
 CHECKPOINT_STEP=${1:-57}
 
 CHECKPOINT_DIR="/data/wang/junh/githubs/Debate/KARE/verl/checkpoints/global_step_${CHECKPOINT_STEP}/actor"
-OUTPUT_DIR="/data/wang/junh/githubs/Debate/KARE/verl/models/format_enforcer_7b_step${CHECKPOINT_STEP}"
+OUTPUT_DIR="/data/wang/junh/githubs/Debate/KARE/verl/models/both_format_enforcer_7b_step${CHECKPOINT_STEP}"
 
 echo "Converting checkpoint at step ${CHECKPOINT_STEP}..."
 echo "  Source: ${CHECKPOINT_DIR}"
