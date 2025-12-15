@@ -122,9 +122,7 @@ class TrainingDataGenerator:
             if sample.get("patient_id") == int(patient_id) and sample.get("visit_id") == int(visit_id):
                 # Format the EHR data
                 context_parts = []
-                context_parts.append(f"Patient ID: {patient_id}, Visit ID: {visit_id}")
-                context_parts.append(f"\nLabel: {sample.get('label', 'Unknown')}")
-                
+                context_parts.append(f"Patient ID: {patient_id}, Visit ID: {visit_id}")                
                 # Add conditions
                 if "conditions" in sample:
                     context_parts.append("\nConditions:")
