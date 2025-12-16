@@ -353,7 +353,8 @@ def run_kare_debate_evaluation(start_idx: int = 0,
                         medical_knowledge="",  # Can be added later if available
                         patient_id=sample['patient_id'],  # Pass patient ID for logging
                         model_name=model_name,  # Pass model name for structured logging
-                        output_dir=output_path  # Pass the full output file path
+                        output_dir=output_path,  # Pass the full output file path
+                        ground_truth=sample['ground_truth']  # Pass ground truth for fallback logic
                     )
                     
                     # Combine results

@@ -1513,7 +1513,8 @@ Provide your clinical analysis and mortality risk assessment:"""
                                   medical_knowledge: str = "",
                                   patient_id: str = "unknown",
                                   model_name: str = None,
-                                  output_dir: str = None) -> Dict[str, Any]:
+                                  output_dir: str = None,
+                                  ground_truth: int = None) -> Dict[str, Any]:
         """
         Conduct structured three-round multi-agent debate for mortality prediction.
         
@@ -1526,6 +1527,7 @@ Provide your clinical analysis and mortality risk assessment:"""
             positive_similars: Positive similar patient contexts (mortality=1)
             negative_similars: Negative similar patient contexts (mortality=0)
             medical_knowledge: Retrieved medical knowledge (optional)
+            ground_truth: Ground truth label (0=survival, 1=mortality), used for fallback when both probabilities are None
             
         Returns:
             Debate results dictionary
@@ -1728,14 +1730,21 @@ Provide your clinical analysis and mortality risk assessment:"""
                 if logger:
                     logger.info(f"Fallback: survival_prob={retry_surv_prob:.3f} <= 0.5, prediction=1")
             else:
-                # Still no probabilities, use target analyst as final fallback
-                print("[FALLBACK] Still no probabilities from retry, using target analyst prediction")
-                final_prediction = target_response.get('prediction')
-                final_mortality_prob = target_response.get('mortality_probability')
-                final_survival_prob = target_response.get('survival_probability')
-                final_confidence = target_response.get('confidence')
-                if logger:
-                    logger.warning("Double fallback - using target analyst prediction")
+                # Still no probabilities, predict opposite of ground truth as final fallback
+                if ground_truth is not None:
+                    final_prediction = 1 - ground_truth  # Opposite of ground truth
+                    print(f"[FALLBACK] Still no probabilities from retry, predicting opposite of ground truth: {final_prediction} (GT={ground_truth})")
+                    if logger:
+                        logger.warning(f"Double fallback - both probabilities None after retry, predicting opposite of ground_truth={ground_truth}, prediction={final_prediction}")
+                else:
+                    # Ground truth not available, use target analyst as fallback
+                    print("[FALLBACK] Still no probabilities from retry and no ground truth, using target analyst prediction")
+                    final_prediction = target_response.get('prediction')
+                    final_mortality_prob = target_response.get('mortality_probability')
+                    final_survival_prob = target_response.get('survival_probability')
+                    final_confidence = target_response.get('confidence')
+                    if logger:
+                        logger.warning("Double fallback - using target analyst prediction")
         
         print(f"\n{'='*80}")
         print(f"DEBATE COMPLETED - Final Prediction: {final_prediction}")

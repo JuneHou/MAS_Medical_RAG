@@ -345,7 +345,8 @@ Provide your clinical analysis and mortality risk assessment:"""
                                   medical_knowledge: str = "",
                                   patient_id: str = "unknown",
                                   model_name: str = None,
-                                  output_dir: str = None) -> Dict[str, Any]:
+                                  output_dir: str = None,
+                                  ground_truth: int = None) -> Dict[str, Any]:
         """
         Conduct structured three-round multi-agent debate for mortality prediction.
         
@@ -358,6 +359,7 @@ Provide your clinical analysis and mortality risk assessment:"""
             positive_similars: Positive similar patient contexts (mortality=1)
             negative_similars: Negative similar patient contexts (mortality=0)
             medical_knowledge: Retrieved medical knowledge (optional)
+            ground_truth: Ground truth label (0=survival, 1=mortality), used for fallback when prediction fails
             
         Returns:
             Debate results dictionary
@@ -505,8 +507,14 @@ Provide your clinical analysis and mortality risk assessment:"""
             print("Warning: No prediction from final integrator, using target prediction as fallback")
             final_prediction = target_response.get('prediction')
             if final_prediction is None:
-                print("Warning: No prediction from any agent, final answer is None")
-                final_prediction = None
+                # Predict opposite of ground truth as final fallback
+                if ground_truth is not None:
+                    final_prediction = 1 - ground_truth  # Opposite of ground truth
+                    print(f"[FALLBACK] No prediction from any agent, predicting opposite of ground truth: {final_prediction} (GT={ground_truth})")
+                    logger.warning(f"Final fallback - no predictions, predicting opposite of ground_truth={ground_truth}, prediction={final_prediction}")
+                else:
+                    print("Warning: No prediction from any agent and no ground truth, final answer is None")
+                    final_prediction = None
         
         print(f"\n{'='*80}")
         print(f"DEBATE COMPLETED - Final Prediction: {final_prediction}")
