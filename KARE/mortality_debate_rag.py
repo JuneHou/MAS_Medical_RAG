@@ -615,21 +615,28 @@ CONCISE SUMMARY  6000 tokens max):
         Returns:
             Tuple of (tool_name, query) or (None, None) if no tool call found
         """
-        # Look for tool call patterns
+        # Look for tool call patterns (in order of specificity)
         patterns = [
+            # Standard function call formats
             r'Tool Call:\s*retrieve\s*\(\s*["\']([^"\']+)["\'\s]*\)',
             r'retrieve\s*\(\s*["\']([^"\']+)["\'\s]*\)',
             r'Tool:\s*retrieve\s*\(\s*["\']([^"\']+)["\'\s]*\)',
             r'RETRIEVE\s*\(\s*["\']([^"\']+)["\'\s]*\)',
             # Pattern for code blocks with ```python\nretrieve("query")\n```
             r'```(?:python)?\s*\n\s*retrieve\s*\(\s*["\']([^"\']+)["\'\s]*\)\s*\n\s*```',
+            # Pattern for standalone quoted query at start of response (common with some models)
+            r'^\s*["\']([^"\']{10,})["\'](?:\s*\n|\s*$)',  # At least 10 chars to avoid false matches
+            # Pattern for query followed by "Retrieving evidence" indicator
+            r'["\']([^"\']{10,})["\'](?:\s*\n+\s*```plaintext\s*\n\s*Retrieving evidence)',
         ]
         
         for pattern in patterns:
-            match = re.search(pattern, response_text, re.IGNORECASE | re.DOTALL)
+            match = re.search(pattern, response_text, re.IGNORECASE | re.DOTALL | re.MULTILINE)
             if match:
                 query = match.group(1).strip()
-                return "retrieve", query
+                # Validate query is reasonable (not too short, contains relevant keywords)
+                if len(query) > 10 and any(kw in query.lower() for kw in ['mortality', 'survival', 'risk', 'prognosis', 'outcome', 'patient', 'sepsis', 'pneumonia']):
+                    return "retrieve", query
         
         return None, None
     

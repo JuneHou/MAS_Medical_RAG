@@ -287,7 +287,7 @@ Provide comprehensive clinical reasoning analyzing ALL available evidence, then 
     
     def generate_dataset(
         self,
-        num_samples: int = 500,
+        num_samples: int = 996,
         train_ratio: float = 0.8,
         random_seed: int = 42
     ):
