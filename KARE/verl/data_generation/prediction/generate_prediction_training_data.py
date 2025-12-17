@@ -205,7 +205,8 @@ class PredictionDataGenerator:
             
             # Setup logging
             if log_dir:
-                log_path = Path(log_dir)
+                # Create debate_logs subdirectory for all debate-related logs
+                log_path = Path(log_dir) / "debate_logs"
                 log_path.mkdir(parents=True, exist_ok=True)
                 log_filename = log_path / f"debate_responses_{sample['patient_id']}.log"
                 logger = logging.getLogger(f"debate_{sample['patient_id']}")
@@ -235,7 +236,7 @@ class PredictionDataGenerator:
                 debate_history=[],
                 logger=logger,
                 patient_id=sample['patient_id'],
-                log_dir=str(log_dir) if log_dir else None
+                log_dir=str(log_path) if log_dir else None
             )
             debate_history.append(target_response)
             
@@ -249,7 +250,7 @@ class PredictionDataGenerator:
                 debate_history=debate_history,
                 logger=logger,
                 patient_id=sample['patient_id'],
-                log_dir=str(log_dir) if log_dir else None
+                log_dir=str(log_path) if log_dir else None
             )
             debate_history.extend(round2_responses)
             
@@ -261,23 +262,26 @@ class PredictionDataGenerator:
             mortality_query = self._generate_mortality_query(debate_history, sample['target_context'])
             survival_query = self._generate_survival_query(debate_history, sample['target_context'])
             
-            # Perform retrieval
+            # Perform retrieval using the debate system's retrieval tool (with logging)
             mortality_docs = []
             survival_docs = []
             
             if self.debate_system.rag_enabled:
-                print(f"Retrieving mortality evidence: '{mortality_query}'")
-                mortality_docs = self.debate_system.retriever.retrieve(
-                    question=mortality_query,
-                    k=self.debate_system.k,
-                    rrf_k=self.debate_system.rrf_k
+                # Use the retrieval tool directly so logs are saved
+                retrieval_tool = self.debate_system._setup_retrieval_tool(k=self.debate_system.k)
+                
+                print(f"Retrieving mortality evidence: '{mortality_query[:100]}...'")
+                mortality_docs = retrieval_tool['func'](
+                    mortality_query,
+                    qid=f"integrator_mortality_{sample['patient_id']}",
+                    log_dir=str(log_path) if log_dir else None
                 )
                 
-                print(f"Retrieving survival evidence: '{survival_query}'")
-                survival_docs = self.debate_system.retriever.retrieve(
-                    question=survival_query,
-                    k=self.debate_system.k,
-                    rrf_k=self.debate_system.rrf_k
+                print(f"Retrieving survival evidence: '{survival_query[:100]}...'")
+                survival_docs = retrieval_tool['func'](
+                    survival_query,
+                    qid=f"integrator_survival_{sample['patient_id']}",
+                    log_dir=str(log_path) if log_dir else None
                 )
             
             return {
