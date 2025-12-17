@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+                    #!/usr/bin/env python3
 """
 KARE Data Adapter for Multi-Agent Debate Integration
 Loads KARE test data and similar patient contexts for mortality prediction.
@@ -15,23 +15,58 @@ class KAREDataAdapter:
     for integration with multi-agent debate system.
     """
     
-    def __init__(self, base_path: str = "./data"):
+    def __init__(self, base_path: str = "./data", split: str = "test"):
         """
         Initialize KARE data adapter.
         
         Args:
             base_path: Base path to KARE dataset directory (relative to script location)
+            split: Data split to load ('train', 'val', or 'test')
         """
         self.base_path = Path(base_path)
         self.ehr_data_path = self.base_path / "ehr_data"
         self.patient_context_path = self.base_path / "patient_context" / "similar_patient_qwen"
+        self.split = split
         
-        # Load test data
-        self.test_data = self._load_test_data()
+        # Load appropriate split data
+        if split == "train":
+            self.data = self._load_train_data()
+        elif split == "val":
+            self.data = self._load_val_data()
+        else:
+            self.data = self._load_test_data()
+        
+        # Keep test_data reference for backward compatibility
+        self.test_data = self.data
+        
         self.similar_patients = self._load_similar_patients()
         
-        print(f"Loaded {len(self.test_data)} test samples")
+        print(f"Loaded {len(self.data)} {split} samples")
         print(f"Loaded similar patient contexts for {len(self.similar_patients)} patients")
+    
+    def _load_train_data(self) -> List[Dict[str, Any]]:
+        """Load MIMIC-III mortality training data."""
+        train_file = self.ehr_data_path / "mimic3_mortality_samples_train.json"
+        
+        if not train_file.exists():
+            raise FileNotFoundError(f"Train data not found: {train_file}")
+        
+        with open(train_file, 'r') as f:
+            data = json.load(f)
+        
+        return data
+    
+    def _load_val_data(self) -> List[Dict[str, Any]]:
+        """Load MIMIC-III mortality validation data."""
+        val_file = self.ehr_data_path / "mimic3_mortality_samples_val.json"
+        
+        if not val_file.exists():
+            raise FileNotFoundError(f"Val data not found: {val_file}")
+        
+        with open(val_file, 'r') as f:
+            data = json.load(f)
+        
+        return data
     
     def _load_test_data(self) -> List[Dict[str, Any]]:
         """Load MIMIC-III mortality test data."""

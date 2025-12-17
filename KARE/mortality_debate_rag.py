@@ -1030,8 +1030,8 @@ Based on the separate tool-assisted assessments:
                 'survival_response': survival_full_response,
                 'mortality_query': mortality_query if 'mortality_query' in locals() else None,
                 'survival_query': survival_query if 'survival_query' in locals() else None,
-                'mortality_retrieved_docs': len(mortality_retrieved_docs),
-                'survival_retrieved_docs': len(survival_retrieved_docs)
+                'mortality_retrieved_docs': mortality_retrieved_docs,  # Full documents, not just count
+                'survival_retrieved_docs': survival_retrieved_docs  # Full documents, not just count
             }
             
         except Exception as e:
