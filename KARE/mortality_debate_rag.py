@@ -646,7 +646,7 @@ CONCISE SUMMARY  6000 tokens max):
         
         Args:
             tool_name: Name of the tool to call
-            query: Query parameter for the tool
+            query: Query parameter for the tool (LLM-generated, may need truncation)
             qid: Question ID for logging
             log_dir: Log directory
             
@@ -656,7 +656,17 @@ CONCISE SUMMARY  6000 tokens max):
         if tool_name == "retrieve" and self.rag_enabled:
             retrieval_tool = self.retrieval_tools.get("round3")  # Use round3 tool for integrator
             if retrieval_tool:
-                print(f"[INTEGRATOR TOOL] Executing retrieve('{query}')")
+                # Truncate integrator-generated queries to 2048 tokens (≈8192 chars)
+                # Integrator queries are LLM-generated and may contain errors, so we limit them
+                # Agent queries (hardcoded patient EHR) are NOT truncated as they are high quality
+                MAX_INTEGRATOR_QUERY_TOKENS = 2048
+                MAX_INTEGRATOR_QUERY_CHARS = MAX_INTEGRATOR_QUERY_TOKENS * 4  # Rough estimate: 1 token ≈ 4 chars
+                
+                if len(query) > MAX_INTEGRATOR_QUERY_CHARS:
+                    print(f"[INTEGRATOR TOOL] Truncating query from {len(query)} to {MAX_INTEGRATOR_QUERY_CHARS} chars (2048 tokens)")
+                    query = query[:MAX_INTEGRATOR_QUERY_CHARS]
+                
+                print(f"[INTEGRATOR TOOL] Executing retrieve('{query[:100]}...') [{len(query)} chars]")
                 return retrieval_tool["func"](query, qid=qid, log_dir=log_dir)
         
         print(f"[ERROR] Unknown tool or RAG disabled: {tool_name}")

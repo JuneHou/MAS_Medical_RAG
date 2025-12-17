@@ -67,6 +67,7 @@ class MortalityDebateSystem:
         self.corpus_name = corpus_name
         self.retriever_name = retriever_name
         self.db_dir = db_dir
+        self.k = 8  # Default number of documents to retrieve
         
         # Initialize MedRAG if enabled
         if self.rag_enabled:
@@ -326,6 +327,10 @@ SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
                 return []
         
         return {"name": "retrieve", "func": retrieve_tool}
+    
+    def _setup_retrieval_tool(self, k=8):
+        """Wrapper for _create_retrieval_tool for compatibility with data generation code."""
+        return self._create_retrieval_tool(k=k)
     
     def _summarize_round_response(self, round_text: str, round_name: str, target_tokens: int = 4000) -> str:
         """
@@ -1111,15 +1116,18 @@ Based on the separate tool-assisted assessments:
                     if retrieval_tool:
                         retrieval_func = retrieval_tool["func"]
                         
-                        # Create agent-specific retrieval query
+                        # Create agent-specific retrieval query with FULL patient context
+                        # Match the behavior of _agent_turn() which uses full context
                         if role == "mortality_risk_assessor":
-                            retrieval_query = f"mortality risk factors complications death prognosis {patient_context[:200]}"
+                            retrieval_query = f"{patient_context}\n\nFocus: mortality risk factors, complications, death prognosis"
                         elif role == "protective_factor_analyst":
-                            retrieval_query = f"survival protective factors recovery positive outcomes {patient_context[:200]}"
+                            retrieval_query = f"{patient_context}\n\nFocus: survival protective factors, recovery, positive outcomes"
                         else:
-                            retrieval_query = patient_context[:300]
+                            retrieval_query = patient_context
                         
-                        retrieved_docs = retrieval_func(retrieval_query, qid=patient_id, log_dir=log_dir)
+                        # Use agent-specific qid for proper log file naming
+                        retrieval_qid = f"{role}_{patient_id}"
+                        retrieved_docs = retrieval_func(retrieval_query, qid=retrieval_qid, log_dir=log_dir)
                         
                         if retrieved_docs:
                             retrieval_context = "\n## Retrieved Medical Evidence:\n"

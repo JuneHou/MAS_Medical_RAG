@@ -262,6 +262,19 @@ class PredictionDataGenerator:
             mortality_query = self._generate_mortality_query(debate_history, sample['target_context'])
             survival_query = self._generate_survival_query(debate_history, sample['target_context'])
             
+            # Truncate integrator-style queries to 2048 tokens (≈8192 chars)
+            # These queries simulate integrator behavior and should match the truncation policy
+            MAX_INTEGRATOR_QUERY_TOKENS = 2048
+            MAX_INTEGRATOR_QUERY_CHARS = MAX_INTEGRATOR_QUERY_TOKENS * 4  # Rough estimate: 1 token ≈ 4 chars
+            
+            if len(mortality_query) > MAX_INTEGRATOR_QUERY_CHARS:
+                print(f"Truncating mortality query from {len(mortality_query)} to {MAX_INTEGRATOR_QUERY_CHARS} chars (2048 tokens)")
+                mortality_query = mortality_query[:MAX_INTEGRATOR_QUERY_CHARS]
+            
+            if len(survival_query) > MAX_INTEGRATOR_QUERY_CHARS:
+                print(f"Truncating survival query from {len(survival_query)} to {MAX_INTEGRATOR_QUERY_CHARS} chars (2048 tokens)")
+                survival_query = survival_query[:MAX_INTEGRATOR_QUERY_CHARS]
+            
             # Perform retrieval using the debate system's retrieval tool (with logging)
             mortality_docs = []
             survival_docs = []
@@ -270,14 +283,14 @@ class PredictionDataGenerator:
                 # Use the retrieval tool directly so logs are saved
                 retrieval_tool = self.debate_system._setup_retrieval_tool(k=self.debate_system.k)
                 
-                print(f"Retrieving mortality evidence: '{mortality_query[:100]}...'")
+                print(f"Retrieving mortality evidence: '{mortality_query[:100]}...' [{len(mortality_query)} chars]")
                 mortality_docs = retrieval_tool['func'](
                     mortality_query,
                     qid=f"integrator_mortality_{sample['patient_id']}",
                     log_dir=str(log_path) if log_dir else None
                 )
                 
-                print(f"Retrieving survival evidence: '{survival_query[:100]}...'")
+                print(f"Retrieving survival evidence: '{survival_query[:100]}...' [{len(survival_query)} chars]")
                 survival_docs = retrieval_tool['func'](
                     survival_query,
                     qid=f"integrator_survival_{sample['patient_id']}",
@@ -327,15 +340,23 @@ class PredictionDataGenerator:
                                     assessment_type: str = 'mortality') -> str:
         """
         Construct the exact integrator prompt that will be used during GRPO training.
-        This replicates the prompt construction in mortality_debate_rag.py's _execute_integrator_attempt.
+        This EXACTLY replicates the prompt from mortality_debate_rag.py Step 1c/2c (mortality_reasoning_prompt/survival_reasoning_prompt).
+        
+        The prompt includes:
+        1. System prompt with tool definition
+        2. Primary context (## Target Patient EHR Context ##)
+        3. Previous debate analysis
+        4. "You called: retrieve(query)" - simulating the tool call
+        5. Retrieved Evidence
+        6. Final instruction to provide probability
         
         Args:
             sample: Patient sample data
-            debate_result: Results from 3-round debate
+            debate_result: Results from 3-round debate (contains simulated query and retrieved docs)
             assessment_type: 'mortality' or 'survival'
             
         Returns:
-            Complete integrator prompt string
+            Complete integrator prompt string matching downstream deployment
         """
         # Use the debate system's method to prepare debate history
         debate_history_text = self.debate_system._prepare_integrator_history(
@@ -345,85 +366,112 @@ class PredictionDataGenerator:
         # Get the appropriate system prompt based on assessment type
         if assessment_type == 'mortality':
             system_prompt = self.debate_system.agent_prompts['balanced_clinical_integrator_mortality']
+            query = debate_result.get('mortality_query', 'mortality risk factors')
+            retrieved_docs = debate_result.get('mortality_retrieved_docs', [])
         else:
             system_prompt = self.debate_system.agent_prompts['balanced_clinical_integrator_survival']
+            query = debate_result.get('survival_query', 'survival protective factors')
+            retrieved_docs = debate_result.get('survival_retrieved_docs', [])
         
-        # Construct patient information section (only target patient - similar patients already in debate history)
-        patient_info = f"""## Target Patient Information:
-{debate_result['patient_context']}"""
+        # Construct primary context - EXACTLY as in downstream (## Target Patient EHR Context ##)
+        primary_context = f"## Target Patient EHR Context ##\n{debate_result['patient_context']}"
         
-        # Extract retrieved documents from debate_result (NOT from integrator response)
-        # These come from the retrieval we did manually, not from integrator
-        retrieval_context = ""
-        if assessment_type == 'mortality':
-            mortality_docs_list = debate_result.get('mortality_retrieved_docs', [])
-            if mortality_docs_list and isinstance(mortality_docs_list, list):
-                mortality_docs_text = self._format_retrieved_docs(mortality_docs_list)
-                if mortality_docs_text:
-                    retrieval_context = f"\n\n## Retrieved Evidence for Mortality Assessment ##\n{mortality_docs_text}"
-        else:  # survival
-            survival_docs_list = debate_result.get('survival_retrieved_docs', [])
-            if survival_docs_list and isinstance(survival_docs_list, list):
-                survival_docs_text = self._format_retrieved_docs(survival_docs_list)
-                if survival_docs_text:
-                    retrieval_context = f"\n\n## Retrieved Evidence for Survival Assessment ##\n{survival_docs_text}"
+        # Format retrieved documents using the debate system's method
+        # This ensures same formatting as deployment
+        retrieved_docs_text = self.debate_system._format_retrieved_docs_for_context(retrieved_docs)
         
-        # Combine all parts into the full prompt
+        # Construct the EXACT prompt format from mortality_debate_rag.py Step 1c/2c
+        # This is what the model will see during GRPO training and must match deployment
         full_prompt = f"""{system_prompt}
 
-{patient_info}
+{primary_context}
 
-{debate_history_text}{retrieval_context}
+## Previous Debate Analysis ##
+{debate_history_text}
 
-Now provide your {assessment_type} probability assessment with comprehensive reasoning."""
+You called: retrieve("{query}")
+
+Retrieved Evidence:
+{retrieved_docs_text}
+
+Now provide your complete {assessment_type} probability assessment based on the retrieved evidence:"""
         
         return full_prompt
     
     def _generate_mortality_query(self, debate_history: List[Dict], patient_context: str) -> str:
         """
-        Generate mortality-focused retrieval query based on debate history.
-        Replicates integrator's query generation logic.
+        Generate mortality-focused retrieval query based on debate history and patient context.
+        Simulates what the integrator LLM would generate as a tool call query.
+        
+        This should be a SHORT, focused query (not the full EHR) that the integrator
+        would generate via tool calling, matching the actual deployment behavior.
         """
-        # Extract key risk factors from debate history
-        risk_factors = []
-        for round_data in debate_history:
-            message = round_data.get('message', '')
-            # Simple extraction of risk-related content
-            if 'risk' in message.lower() or 'mortality' in message.lower():
-                # Extract first sentence or first 100 chars as risk factor
-                risk_snippet = message[:200].split('.')[0]
-                risk_factors.append(risk_snippet)
+        # Extract key conditions from patient context to create a realistic short query
+        # Parse the patient context to identify main conditions
+        import re
+        conditions = []
         
-        # Combine into query
-        if risk_factors:
-            query = f"mortality risk {' '.join(risk_factors[:3])}"
+        # Look for conditions section
+        conditions_match = re.search(r'Conditions:\s*(.*?)(?:Procedures:|Medications:|$)', patient_context, re.DOTALL)
+        if conditions_match:
+            conditions_text = conditions_match.group(1)
+            # Extract first few conditions (typically most severe)
+            condition_lines = [line.strip() for line in conditions_text.split('\n') if line.strip() and re.match(r'^\d+\.', line.strip())]
+            conditions = [re.sub(r'^\d+\.\s*', '', line) for line in condition_lines[:3]]  # Top 3 conditions
+        
+        # Create a realistic short query that an LLM would generate
+        if conditions:
+            # Create focused query based on main conditions
+            main_condition = conditions[0] if conditions else "patient"
+            query = f"{main_condition} mortality risk prognosis"
+            
+            # Add additional context if multiple severe conditions
+            if len(conditions) > 1:
+                query = f"{conditions[0]} {conditions[1]} mortality outcomes"
         else:
-            query = "mortality risk factors complications"
+            # Fallback if parsing fails
+            query = "mortality risk factors severe illness prognosis"
         
-        return query[:200]  # Limit query length
+        return query
     
     def _generate_survival_query(self, debate_history: List[Dict], patient_context: str) -> str:
         """
-        Generate survival-focused retrieval query based on debate history.
-        Replicates integrator's query generation logic.
+        Generate survival-focused retrieval query based on debate history and patient context.
+        Simulates what the integrator LLM would generate as a tool call query.
+        
+        This should be a SHORT, focused query (not the full EHR) that the integrator
+        would generate via tool calling, matching the actual deployment behavior.
         """
-        # Extract key protective factors from debate history
-        protective_factors = []
-        for round_data in debate_history:
-            message = round_data.get('message', '')
-            # Simple extraction of protective/survival content
-            if 'protective' in message.lower() or 'survival' in message.lower():
-                # Extract first sentence or first 100 chars
-                protective_snippet = message[:200].split('.')[0]
-                protective_factors.append(protective_snippet)
+        # Extract key conditions from patient context to create a realistic short query
+        import re
+        conditions = []
+        procedures = []
         
-        # Combine into query
-        if protective_factors:
-            query = f"survival outcomes {' '.join(protective_factors[:3])}"
+        # Look for conditions section
+        conditions_match = re.search(r'Conditions:\s*(.*?)(?:Procedures:|Medications:|$)', patient_context, re.DOTALL)
+        if conditions_match:
+            conditions_text = conditions_match.group(1)
+            condition_lines = [line.strip() for line in conditions_text.split('\n') if line.strip() and re.match(r'^\d+\.', line.strip())]
+            conditions = [re.sub(r'^\d+\.\s*', '', line) for line in condition_lines[:3]]
+        
+        # Look for procedures section
+        procedures_match = re.search(r'Procedures:\s*(.*?)(?:Medications:|$)', patient_context, re.DOTALL)
+        if procedures_match:
+            procedures_text = procedures_match.group(1)
+            procedure_lines = [line.strip() for line in procedures_text.split('\n') if line.strip() and re.match(r'^\d+\.', line.strip())]
+            procedures = [re.sub(r'^\d+\.\s*', '', line) for line in procedure_lines[:2]]
+        
+        # Create a realistic short query focusing on treatment and recovery
+        if conditions and procedures:
+            query = f"{conditions[0]} treatment {procedures[0]} recovery outcomes"
+        elif conditions:
+            query = f"{conditions[0]} treatment survival recovery"
+        elif procedures:
+            query = f"{procedures[0]} patient recovery outcomes"
         else:
-            query = "survival prognosis recovery outcomes"
+            query = "treatment recovery survival outcomes"
         
-        return query[:200]  # Limit query length
+        return query
     
     def _save_parquet(self, training_examples: List[Dict[str, Any]], output_dir: str) -> str:
         """
