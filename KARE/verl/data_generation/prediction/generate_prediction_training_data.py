@@ -254,28 +254,74 @@ class PredictionDataGenerator:
             )
             debate_history.extend(round2_responses)
             
-            # Round 3: Do ONLY the retrieval that integrator would do (no LLM call)
-            print(f"\n--- ROUND 3: RETRIEVAL ONLY (NO INTEGRATOR RESPONSE) ---")
+            # Round 3: Let integrator LLM generate queries via tool calling, then retrieve
+            print(f"\n--- ROUND 3: INTEGRATOR TOOL CALLING FOR RETRIEVAL ---")
             
-            # Prepare retrieval queries based on debate history
-            # Replicate the integrator's retrieval logic without running the LLM
-            mortality_query = self._generate_mortality_query(debate_history, sample['target_context'])
-            survival_query = self._generate_survival_query(debate_history, sample['target_context'])
+            # Prepare integrator history for query generation
+            history_text = self.debate_system._prepare_integrator_history(debate_history)
+            primary_context = f"## Target Patient EHR Context ##\n{sample['target_context']}"
             
-            # Truncate integrator-style queries to 2048 tokens (≈8192 chars)
-            # These queries simulate integrator behavior and should match the truncation policy
-            MAX_INTEGRATOR_QUERY_TOKENS = 2048
-            MAX_INTEGRATOR_QUERY_CHARS = MAX_INTEGRATOR_QUERY_TOKENS * 4  # Rough estimate: 1 token ≈ 4 chars
+            # Step 3a: Generate MORTALITY query via LLM tool calling
+            print("Step 3a: Generating mortality query via integrator LLM...")
+            mortality_prompt = f"""{self.debate_system.agent_prompts["balanced_clinical_integrator_mortality"]}
+
+{primary_context}
+
+## Previous Debate Analysis ##
+{history_text}
+
+Start by calling retrieve() to gather medical evidence:"""
             
-            if len(mortality_query) > MAX_INTEGRATOR_QUERY_CHARS:
-                print(f"Truncating mortality query from {len(mortality_query)} to {MAX_INTEGRATOR_QUERY_CHARS} chars (2048 tokens)")
-                mortality_query = mortality_query[:MAX_INTEGRATOR_QUERY_CHARS]
+            mortality_tool_response = self.debate_system.integrator_llm(
+                mortality_prompt,
+                max_tokens=32768,
+                temperature=0.3,
+                top_p=0.9,
+                return_format='string',
+                stop_sequences=["<|im_end|>", "</s>", "End of response.", "---"],
+                repetition_penalty=1.15,
+                enable_thinking=True
+            )
             
-            if len(survival_query) > MAX_INTEGRATOR_QUERY_CHARS:
-                print(f"Truncating survival query from {len(survival_query)} to {MAX_INTEGRATOR_QUERY_CHARS} chars (2048 tokens)")
-                survival_query = survival_query[:MAX_INTEGRATOR_QUERY_CHARS]
+            # Parse tool call to extract query
+            tool_name, mortality_query = self.debate_system._parse_tool_call(mortality_tool_response)
+            if not mortality_query or tool_name != "retrieve":
+                print(f"[WARNING] Failed to parse mortality query, using fallback")
+                mortality_query = "mortality risk factors severe illness prognosis"
             
-            # Perform retrieval using the debate system's retrieval tool (with logging)
+            print(f"Generated mortality query: '{mortality_query}' [{len(mortality_query)} chars]")
+            
+            # Step 3b: Generate SURVIVAL query via LLM tool calling
+            print("Step 3b: Generating survival query via integrator LLM...")
+            survival_prompt = f"""{self.debate_system.agent_prompts["balanced_clinical_integrator_survival"]}
+
+{primary_context}
+
+## Previous Debate Analysis ##
+{history_text}
+
+Start by calling retrieve() to gather medical evidence:"""
+            
+            survival_tool_response = self.debate_system.integrator_llm(
+                survival_prompt,
+                max_tokens=32768,
+                temperature=0.3,
+                top_p=0.9,
+                return_format='string',
+                stop_sequences=["<|im_end|>", "</s>", "End of response.", "---"],
+                repetition_penalty=1.15,
+                enable_thinking=True
+            )
+            
+            # Parse tool call to extract query
+            tool_name, survival_query = self.debate_system._parse_tool_call(survival_tool_response)
+            if not survival_query or tool_name != "retrieve":
+                print(f"[WARNING] Failed to parse survival query, using fallback")
+                survival_query = "survival protective factors treatment outcomes"
+            
+            print(f"Generated survival query: '{survival_query}' [{len(survival_query)} chars]")
+            
+            # Step 3c: Execute retrieval with LLM-generated queries
             mortality_docs = []
             survival_docs = []
             
@@ -283,14 +329,14 @@ class PredictionDataGenerator:
                 # Use the retrieval tool directly so logs are saved
                 retrieval_tool = self.debate_system._setup_retrieval_tool(k=self.debate_system.k)
                 
-                print(f"Retrieving mortality evidence: '{mortality_query[:100]}...' [{len(mortality_query)} chars]")
+                print(f"Retrieving mortality evidence with LLM-generated query...")
                 mortality_docs = retrieval_tool['func'](
                     mortality_query,
                     qid=f"integrator_mortality_{sample['patient_id']}",
                     log_dir=str(log_path) if log_dir else None
                 )
                 
-                print(f"Retrieving survival evidence: '{survival_query[:100]}...' [{len(survival_query)} chars]")
+                print(f"Retrieving survival evidence with LLM-generated query...")
                 survival_docs = retrieval_tool['func'](
                     survival_query,
                     qid=f"integrator_survival_{sample['patient_id']}",
