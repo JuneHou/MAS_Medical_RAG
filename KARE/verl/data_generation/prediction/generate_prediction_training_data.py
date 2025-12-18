@@ -142,12 +142,15 @@ class PredictionDataGenerator:
                 training_examples.append({
                     'prompt': mortality_prompt,
                     'data_source': 'kare_mortality_prediction',
-                    'ground_truth': sample['ground_truth'],
+                    'ground_truth': sample['ground_truth'],  # Keep for reference
                     'extra_info': {
                         'patient_id': sample['patient_id'],
                         'visit_id': sample['visit_id'],
                         'split': self.data_split,
-                        'assessment_type': 'mortality'
+                        'assessment_type': 'mortality'  # Used by reward function to select mortality prob
+                    },
+                    'reward_model': {
+                        'ground_truth': sample['ground_truth']  # VERL passes this to reward function
                     }
                 })
                 
@@ -161,12 +164,15 @@ class PredictionDataGenerator:
                 training_examples.append({
                     'prompt': survival_prompt,
                     'data_source': 'kare_survival_prediction',
-                    'ground_truth': sample['ground_truth'],
+                    'ground_truth': sample['ground_truth'],  # Keep for reference
                     'extra_info': {
                         'patient_id': sample['patient_id'],
                         'visit_id': sample['visit_id'],
                         'split': self.data_split,
-                        'assessment_type': 'survival'
+                        'assessment_type': 'survival'  # Used by reward function to select survival prob
+                    },
+                    'reward_model': {
+                        'ground_truth': sample['ground_truth']  # VERL passes this to reward function
                     }
                 })
                 
@@ -537,8 +543,9 @@ Now provide your complete {assessment_type} probability assessment based on the 
         # Convert to DataFrame
         df = pd.DataFrame(training_examples)
         
-        # Convert extra_info dict to JSON string for Parquet compatibility
-        df['extra_info'] = df['extra_info'].apply(json.dumps)
+        # NOTE: Keep extra_info as dict - Parquet handles nested structures fine
+        # VERL's dataset loader expects dict, not JSON string
+        # Do NOT convert: df['extra_info'] = df['extra_info'].apply(json.dumps)
         
         # Save to Parquet
         output_file = output_path / f"{self.data_split}.parquet"
@@ -578,6 +585,10 @@ def main():
                        help='Path to balanced sample JSON file (overrides num_samples/start_idx)')
     
     args = parser.parse_args()
+    
+    # Set CUDA_VISIBLE_DEVICES before any CUDA imports to prevent GPU leakage
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpus
+    print(f"Setting CUDA_VISIBLE_DEVICES={args.gpus}")
     
     # Initialize generator
     generator = PredictionDataGenerator(

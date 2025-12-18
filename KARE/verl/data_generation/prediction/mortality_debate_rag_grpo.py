@@ -96,7 +96,7 @@ class MortalityDebateSystem:
             print("RAG disabled - using debate without medical retrieval.")
         
         # Initialize main VLLM wrapper for agents 1-3
-        os.environ['CUDA_VISIBLE_DEVICES'] = self.main_gpu
+        # Note: CUDA_VISIBLE_DEVICES should be set before script imports, not here
         self.llm = VLLMWrapper(model_name=model_name, enable_thinking=True)  # VLLMWrapper handles max_model_len internally
         
         # Initialize integrator VLLM wrapper if different model
@@ -108,7 +108,7 @@ class MortalityDebateSystem:
             tensor_parallel_size = len(integrator_gpu_list)
             
             print(f"DEBUG: Integrator will use {tensor_parallel_size} GPU(s): {integrator_gpu_list}")
-            os.environ['CUDA_VISIBLE_DEVICES'] = self.integrator_gpu
+            # Note: CUDA_VISIBLE_DEVICES should be set before script imports, not here
             
             # Initialize with tensor parallelism if multiple GPUs
             if tensor_parallel_size > 1:

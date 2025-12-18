@@ -223,6 +223,33 @@ If reward stays low (<0.3) after 3 epochs:
 - **"wandb: Network error"**: Use offline mode: `export WANDB_MODE=offline`
 - **Don't want WandB**: Set `WANDB_DISABLED=true` or change trainer config to `trainer.logger='["console"]'`
 
+### Data Loading Error: `'str' object has no attribute 'get'` or `KeyError: 'reward_model'`
+If you see these errors during training:
+- **Cause 1**: `extra_info` field was JSON string instead of dict
+- **Cause 2**: Missing `reward_model` column (VERL requires this structure)
+- **Quick Fix** (convert existing files without regeneration):
+  ```bash
+  cd /data/wang/junh/githubs/Debate/KARE/verl/data_generation/prediction
+  python -c "
+import pandas as pd
+import json
+for fname in ['train.parquet', 'val.parquet']:
+    try:
+        df = pd.read_parquet(fname)
+        # Fix 1: Convert extra_info from JSON string to dict
+        if 'extra_info' in df.columns:
+            df['extra_info'] = df['extra_info'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
+        # Fix 2: Add reward_model column if missing
+        if 'reward_model' not in df.columns and 'ground_truth' in df.columns:
+            df['reward_model'] = df.apply(lambda row: {'ground_truth': row['ground_truth']}, axis=1)
+        df.to_parquet(fname, index=False)
+        print(f'✓ Fixed {fname}')
+    except FileNotFoundError:
+        pass
+"
+  ```
+- **Note**: `reward_model` is just a data structure containing `ground_truth`. Your actual reward function (`kare_prediction_reward.py`) runs during training - no separate reward model needed!
+
 ## 📝 Key Implementation Details
 
 ### Reward Function

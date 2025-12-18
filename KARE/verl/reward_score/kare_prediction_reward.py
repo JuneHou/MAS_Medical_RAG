@@ -41,14 +41,14 @@ import json
 from typing import Optional
 
 
-# Patterns for extracting probabilities
+# Patterns for extracting probabilities - MUST MATCH downstream parsing exactly
 MORTALITY_PATTERN = re.compile(
-    r'MORTALITY\s+PROBABILITY\s*:\s*([0-9]+(?:\.[0-9]+)?)',
+    r'MORTALITY PROBABILITY:\s*([0-9]*\.?[0-9]+)',
     re.IGNORECASE
 )
 
 SURVIVAL_PATTERN = re.compile(
-    r'SURVIVAL\s+PROBABILITY\s*:\s*([0-9]+(?:\.[0-9]+)?)',
+    r'SURVIVAL PROBABILITY:\s*([0-9]*\.?[0-9]+)',
     re.IGNORECASE
 )
 
