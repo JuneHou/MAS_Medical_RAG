@@ -12,6 +12,13 @@ import time
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 
+try:
+    from openai import OpenAI
+    FIREWORKS_AVAILABLE = True
+except ImportError:
+    FIREWORKS_AVAILABLE = False
+    print("Warning: OpenAI library not available. Fireworks API support disabled.")
+
 # Add MedRAG paths for VLLM wrapper - make configurable for different servers
 medrag_root = os.environ.get("MEDRAG_ROOT", "/data/wang/junh/githubs/mirage_medrag/MedRAG")
 sys.path.insert(0, medrag_root)
@@ -29,32 +36,55 @@ class MortalityDebateSystem:
                  model_name: str = "Qwen/Qwen3-4B-Instruct-2507", 
                  gpu_ids: str = "6,7",
                  integrator_model_name: str = None,
-                 integrator_gpu: str = None):
+                 integrator_gpu: str = None,
+                 use_fireworks: bool = False,
+                 fireworks_api_key: str = None):
         """
         Initialize the mortality debate system.
         
         Args:
-            model_name: HuggingFace model name for VLLM (agents 1-3)
+            model_name: HuggingFace model name for VLLM (agents 1-3) or Fireworks model name if use_fireworks=True
             gpu_ids: GPU IDs to use for main model (comma-separated)
             integrator_model_name: Model name for integrator agent. If None, uses model_name
             integrator_gpu: GPU ID for integrator model. If None, uses second GPU from gpu_ids
+            use_fireworks: If True, use Fireworks API for agents 1-3 instead of VLLM
+            fireworks_api_key: Fireworks API key. If None, reads from FIREWORKS_API_KEY env var
         """
         # Store model configurations
         self.model_name = model_name
         self.integrator_model_name = integrator_model_name or model_name
         self.gpu_ids = gpu_ids
+        self.use_fireworks = use_fireworks
         
         # Determine integrator GPU
         gpu_list = gpu_ids.split(',')
         self.main_gpu = gpu_list[0]
         self.integrator_gpu = integrator_gpu or (gpu_list[1] if len(gpu_list) > 1 else gpu_list[0])
         
-        print(f"Main model ({model_name}) will use GPU: {self.main_gpu}")
-        print(f"Integrator model ({self.integrator_model_name}) will use GPU: {self.integrator_gpu}")
+        # Initialize main model (Fireworks API or VLLM) for agents 1-3
+        if use_fireworks:
+            if not FIREWORKS_AVAILABLE:
+                raise ImportError("OpenAI library required for Fireworks API. Install with: pip install openai")
+            
+            # Get API key from parameter or environment
+            api_key = fireworks_api_key or os.environ.get('FIREWORKS_API_KEY')
+            if not api_key:
+                raise ValueError("Fireworks API key required. Set FIREWORKS_API_KEY env var or pass fireworks_api_key parameter")
+            
+            print(f"Main model ({model_name}) will use Fireworks API")
+            self.fireworks_client = OpenAI(
+                base_url="https://api.fireworks.ai/inference/v1",
+                api_key=api_key
+            )
+            self.llm = None  # Not using VLLM for main agents
+        else:
+            print(f"Main model ({model_name}) will use GPU: {self.main_gpu}")
+            # Initialize main VLLM wrapper for agents 1-3
+            os.environ['CUDA_VISIBLE_DEVICES'] = self.main_gpu
+            self.llm = VLLMWrapper(model_name=model_name)
+            self.fireworks_client = None
         
-        # Initialize main VLLM wrapper for agents 1-3
-        os.environ['CUDA_VISIBLE_DEVICES'] = self.main_gpu
-        self.llm = VLLMWrapper(model_name=model_name)
+        print(f"Integrator model ({self.integrator_model_name}) will use GPU: {self.integrator_gpu}")
         
         # Initialize integrator VLLM wrapper if different model
         if self.integrator_model_name != model_name:
@@ -91,25 +121,58 @@ class MortalityDebateSystem:
         # System prompts for each agent
         self.agent_prompts = self._initialize_agent_prompts()
         
+    def _call_fireworks_api(self, prompt: str, max_tokens: int = 8192, temperature: float = 0.7) -> str:
+        """
+        Call Fireworks API for text generation.
+        
+        Args:
+            prompt: Input prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            
+        Returns:
+            Generated text response
+        """
+        try:
+            response = self.fireworks_client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": "You are a helpful medical AI assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=0.9
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error calling Fireworks API: {e}")
+            raise
+    
     def _initialize_agent_prompts(self) -> Dict[str, str]:
         """Initialize specialized prompts for each agent role."""
         
         return {
-            "target_patient_analyst": """You are a medical AI that predicts whether a patient will die in the NEXT hospital visit.
+            "target_patient_analyst": """You are a medical AI analyzing a patient's EHR to analyze factors could leads to NEXT hospital visit.
 
-You see ONLY the target patient's temporal EHR context.
+Analyze the patient data and provide:
 
-Your job:
-1) Read all visits in order and summarize the main clinical story (conditions, procedures, medications).
-2) List totally 5 main factors that contribute to mortality or survival of patient.
-3) Provide a brief explanation (2–3 sentences).
-4) Make an initial prediction.
+**CLINICAL SUMMARY:**
+Briefly summarize the patient's main conditions, treatments, and clinical trajectory.
 
-CRITICAL FORMAT REQUIREMENT: You MUST end your response with exactly one of these lines:
-\\boxed{0} - if you predict SURVIVAL (patient will NOT die in next visit)
-\\boxed{1} - if you predict MORTALITY (patient WILL die in next visit)
+**RISK FACTORS (that increase death risk):**
+1. [Risk factor 1]: [Brief explanation]
+2. [Risk factor 2]: [Brief explanation]  
+3. [Risk factor 3]: [Brief explanation]
 
-Do not include anything after the \\boxed{} prediction.""",
+**PROTECTIVE FACTORS (that support survival):**
+1. [Protective factor 1]: [Brief explanation]
+2. [Protective factor 2]: [Brief explanation]
+3. [Protective factor 3]: [Brief explanation]
+
+**ASSESSMENT:**
+Based on the balance of risk vs protective factors, explain your reasoning (2-3 sentences).
+""",
 
             "positive_similar_comparator": """You are a medical AI that analyzes similar patients who DIED (mortality = 1).
 
@@ -135,34 +198,38 @@ IMPORTANT:
 - DO NOT output \\boxed{0} or \\boxed{1}.
 - Your job is only to provide EVIDENCE that supports SURVIVAL (no death in the next visit).""",
 
-            "medical_knowledge_integrator": """You are a medical AI that makes the FINAL decision about outcome in the NEXT hospital visit.
+            "medical_knowledge_integrator_mortality": """You are a medical AI Clinical Assistant analyzing MORTALITY risk for the NEXT hospital visit.
 
-You see:
-- The target patient's analysis and initial prediction (Round 1).
-- General mortality-risk patterns from fatal cases (positive agent).
-- General survival-risk patterns from survivor cases (negative agent).
+Instructions:
+1) Review all available information from previous agents
+2) Focus ONLY on factors that increase death probability
+3) Be conservative: mortality is rare, so strong evidence is needed for high mortality probability
+4) Consider the patient's specific conditions, trajectory, and patterns from similar cases
 
-Your job:
-1) Check if the Round 1 reasoning matches the general death and survival patterns.
-2) Weigh both sides and decide if the initial prediction should stay the same or be changed.
-3) Explain your decision in 2–4 short bullet points and 2–3 sentences.
+Provide comprehensive clinical reasoning and end with:
+MORTALITY PROBABILITY: X.XX (0.00 to 1.00)""",
 
-CRITICAL FINAL STEP: You MUST end your response with exactly one of these lines:
-\\boxed{0} - if your FINAL prediction is SURVIVAL (patient will NOT die in next visit)
-\\boxed{1} - if your FINAL prediction is MORTALITY (patient WILL die in next visit)
+            "medical_knowledge_integrator_survival": """You are a medical AI Clinical Assistant analyzing SURVIVAL probability for the NEXT hospital visit.
 
-Do not include anything after the \\boxed{} prediction."""
+Instructions:
+1) Review all available information from previous agents
+2) Focus ONLY on factors that support patient survival and recovery potential
+3) Consider: most patients survive, so identify positive prognostic factors
+4) Consider the patient's specific conditions, trajectory, and patterns from similar cases
+
+Provide comprehensive clinical reasoning and end with:
+SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)"""
         }
     
-    def _extract_prediction(self, response) -> Optional[int]:
+    def _extract_prediction_and_probabilities(self, response) -> Dict[str, Any]:
         """
-        Extract prediction from agent response.
+        Extract prediction and probability scores from agent response.
         
         Args:
             response: Agent response (string or list format)
             
         Returns:
-            Extracted prediction (0 or 1) or None if not found
+            Dictionary with prediction, mortality_prob, survival_prob
         """
         # Ensure response is a string
         if isinstance(response, list):
@@ -173,22 +240,57 @@ Do not include anything after the \\boxed{} prediction."""
         elif not isinstance(response, str):
             response = str(response)
         
-        # Look for \\boxed{0} or \\boxed{1} pattern - EXACTLY 0 or 1, not other characters
-        boxed_pattern = r'\\boxed\{([01])\}'
-        match = re.search(boxed_pattern, response)
+        result = {
+            'prediction': None,
+            'mortality_probability': None,
+            'survival_probability': None
+        }
         
-        if match:
-            return int(match.group(1))
+        # Extract mortality probability
+        mortality_patterns = [
+            r'MORTALITY PROBABILITY:\s*([0-9]*\.?[0-9]+)',
+            r'Mortality Probability:\s*([0-9]*\.?[0-9]+)',
+            r'mortality\s*probability\s*:?\s*([0-9]*\.?[0-9]+)',
+        ]
+        for pattern in mortality_patterns:
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                result['mortality_probability'] = float(match.group(1))
+                break
         
-        # Also try without double backslash (in case it's single backslash) - EXACTLY 0 or 1
-        simple_pattern = r'boxed\{([01])\}'
-        match = re.search(simple_pattern, response)
+        # Extract survival probability
+        survival_patterns = [
+            r'SURVIVAL PROBABILITY:\s*([0-9]*\.?[0-9]+)',
+            r'Survival Probability:\s*([0-9]*\.?[0-9]+)',
+            r'survival\s*probability\s*:?\s*([0-9]*\.?[0-9]+)',
+        ]
+        for pattern in survival_patterns:
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                result['survival_probability'] = float(match.group(1))
+                break
         
-        if match:
-            return int(match.group(1))
+        # Determine binary prediction from probabilities if available
+        if result['mortality_probability'] is not None and result['survival_probability'] is not None:
+            result['prediction'] = 1 if result['mortality_probability'] > result['survival_probability'] else 0
+        elif result['mortality_probability'] is not None:
+            result['prediction'] = 1 if result['mortality_probability'] > 0.5 else 0
+        elif result['survival_probability'] is not None:
+            result['prediction'] = 0 if result['survival_probability'] > 0.5 else 1
         
-        # No fallback guessing - return None if no explicit boxed prediction found
-        return None
+        # Fallback: Look for \\boxed{0} or \\boxed{1} pattern
+        if result['prediction'] is None:
+            boxed_pattern = r'\\boxed\{([01])\}'
+            match = re.search(boxed_pattern, response)
+            if match:
+                result['prediction'] = int(match.group(1))
+            else:
+                simple_pattern = r'boxed\{([01])\}'
+                match = re.search(simple_pattern, response)
+                if match:
+                    result['prediction'] = int(match.group(1))
+        
+        return result
     
     def _agent_turn(self, 
                    role: str, 
@@ -213,7 +315,13 @@ Do not include anything after the \\boxed{} prediction."""
         print(f"\n--- {role.upper()} TURN ---")
         
         # Get system prompt for this role
-        system_prompt = self.agent_prompts.get(role, self.agent_prompts["target_patient_analyst"])
+        # Handle integrator roles (mortality and survival assessments)
+        if role == "medical_knowledge_integrator_mortality":
+            system_prompt = self.agent_prompts["medical_knowledge_integrator_mortality"]
+        elif role == "medical_knowledge_integrator_survival":
+            system_prompt = self.agent_prompts["medical_knowledge_integrator_survival"]
+        else:
+            system_prompt = self.agent_prompts.get(role, self.agent_prompts["target_patient_analyst"])
         
         # Format debate history for context (only for Round 1 and Round 3 agents)
         history_text = ""
@@ -249,10 +357,10 @@ Do not include anything after the \\boxed{} prediction."""
             primary_context = f"## Negative Similar Patients (Mortality = 0) ##\n{similar_patients.get('negative', 'No negative similar patients available.')}"
             # Let agent validate Round 1 analysis instead of re-analyzing raw target context
             secondary_context = ""
-        else:  # medical_knowledge_integrator
+        elif role in ["medical_knowledge_integrator_mortality", "medical_knowledge_integrator_survival"]:
             primary_context = f"## Target Patient EHR Context ##\n{patient_context}"
-            secondary_context = f"\n## Positive Similar Patients ##\n{similar_patients.get('positive', 'None')}"
-            secondary_context += f"\n## Negative Similar Patients ##\n{similar_patients.get('negative', 'None')}"
+            secondary_context = f"\n## Mortality Risk Cases ##\n{similar_patients.get('positive', 'None')}"
+            secondary_context += f"\n## Survival Cases ##\n{similar_patients.get('negative', 'None')}"
             if medical_knowledge:
                 secondary_context += f"\n## Medical Knowledge ##\n{medical_knowledge}"
         
@@ -274,7 +382,8 @@ Provide your clinical analysis and mortality risk assessment:"""
                 "target_patient_analyst": 0.7,
                 "positive_similar_comparator": 0.3,
                 "negative_similar_comparator": 0.3,
-                "medical_knowledge_integrator": 0.5
+                "medical_knowledge_integrator_mortality": 0.5,
+                "medical_knowledge_integrator_survival": 0.5
             }
             temperature = agent_temps.get(role, 0.5)
             
@@ -283,27 +392,42 @@ Provide your clinical analysis and mortality risk assessment:"""
                 max_tokens = 8192  # Round 1: Comprehensive target analysis with full context
             elif role in ["positive_similar_comparator", "negative_similar_comparator"]:
                 max_tokens = 8192  # Round 2: Detailed comparison analysis with full similar patient context
-            else:  # medical_knowledge_integrator
+            elif role in ["medical_knowledge_integrator_mortality", "medical_knowledge_integrator_survival"]:
                 max_tokens = 32768  # Round 3: Maximum available tokens for comprehensive integration
             
-            # Select appropriate model based on agent role
-            if role == "medical_knowledge_integrator":
-                # Use integrator model (potentially larger 70B model)
-                selected_llm = self.integrator_llm
-                print(f"Using integrator model: {self.integrator_model_name}")
+            # Select appropriate model/API based on agent role
+            if role in ["medical_knowledge_integrator_mortality", "medical_knowledge_integrator_survival"]:
+                # Always use VLLM integrator model for integrator agents
+                print(f"Using integrator model (VLLM): {self.integrator_model_name}")
+                response = self.integrator_llm(
+                    prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=0.9,
+                    return_format='string',
+                    stop_sequences=["<|im_end|>", "</s>"],
+                    enable_think=True
+                )
+            elif self.use_fireworks:
+                # Use Fireworks API for agents 1-3
+                print(f"Using Fireworks API: {self.model_name}")
+                response = self._call_fireworks_api(
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
             else:
-                # Use main model for other agents
-                selected_llm = self.llm
-                
-            response = selected_llm(
-                prompt,
-                max_tokens=max_tokens,  # Use max_tokens for new tokens to generate
-                temperature=temperature,
-                top_p=0.9,
-                return_format='string',  # Ensure we get a string response
-                stop_sequences=["<|im_end|>", "</s>"],  # Remove boxed stop sequences to allow completion
-                enable_think=True  # Enable thinking mode for better reasoning
-            )
+                # Use VLLM for agents 1-3
+                print(f"Using VLLM: {self.model_name}")
+                response = self.llm(
+                    prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=0.9,
+                    return_format='string',
+                    stop_sequences=["<|im_end|>", "</s>"],
+                    enable_think=True
+                )
             
             generation_time = time.time() - start_time
             
@@ -312,15 +436,19 @@ Provide your clinical analysis and mortality risk assessment:"""
             if logger:
                 logger.info(log_message)
             
-            # Extract prediction
-            prediction = self._extract_prediction(response)
+            # Extract prediction and probabilities
+            extraction_result = self._extract_prediction_and_probabilities(response)
             if logger:
-                logger.info(f"EXTRACTED PREDICTION: {prediction}")
+                logger.info(f"EXTRACTED PREDICTION: {extraction_result['prediction']}")
+                logger.info(f"MORTALITY PROBABILITY: {extraction_result['mortality_probability']}")
+                logger.info(f"SURVIVAL PROBABILITY: {extraction_result['survival_probability']}")
             
             return {
                 'role': role,
                 'message': response,
-                'prediction': prediction if role not in ["positive_similar_comparator", "negative_similar_comparator"] else None,
+                'prediction': extraction_result['prediction'] if role not in ["positive_similar_comparator", "negative_similar_comparator"] else None,
+                'mortality_probability': extraction_result.get('mortality_probability'),
+                'survival_probability': extraction_result.get('survival_probability'),
                 'generation_time': generation_time,
                 'prompt_length': len(prompt),
                 'response_length': len(response)
@@ -485,18 +613,67 @@ Provide your clinical analysis and mortality risk assessment:"""
         debate_history.append(negative_response)
         print(f"Negative Comparator: {negative_response.get('message', 'No response')[:200]}...")
         
-        # Round 3: Integration and Final Consensus
-        print(f"\n--- ROUND 3: INTEGRATION AND CONSENSUS ---")
-        integrator_response = self._agent_turn(
-            role="medical_knowledge_integrator",
+        # Round 3: Integration and Final Consensus (Two-Step Process)
+        print(f"\n--- ROUND 3: INTEGRATION AND CONSENSUS (TWO-STEP) ---")
+        
+        # Step 1: Mortality assessment
+        print("Step 1: Assessing mortality probability...")
+        mortality_response = self._agent_turn(
+            role="medical_knowledge_integrator_mortality",
             patient_context=patient_context,
             similar_patients=similar_patients_dict,
             medical_knowledge=medical_knowledge,
             debate_history=debate_history,
             logger=logger
         )
+        print(f"Mortality Assessment: {mortality_response.get('message', 'No response')[:200]}...")
+        print(f"Mortality Probability: {mortality_response.get('mortality_probability')}")
+        
+        # Step 2: Survival assessment
+        print("Step 2: Assessing survival probability...")
+        survival_response = self._agent_turn(
+            role="medical_knowledge_integrator_survival",
+            patient_context=patient_context,
+            similar_patients=similar_patients_dict,
+            medical_knowledge=medical_knowledge,
+            debate_history=debate_history,
+            logger=logger
+        )
+        print(f"Survival Assessment: {survival_response.get('message', 'No response')[:200]}...")
+        print(f"Survival Probability: {survival_response.get('survival_probability')}")
+        
+        # Combine the two assessments
+        mortality_prob = mortality_response.get('mortality_probability')
+        survival_prob = survival_response.get('survival_probability')
+        
+        # Create combined integrator response
+        combined_message = f"""## Mortality Assessment:
+{mortality_response.get('message', 'No response')}
+
+## Survival Assessment:
+{survival_response.get('message', 'No response')}"""
+        
+        integrator_response = {
+            'role': 'medical_knowledge_integrator',
+            'message': combined_message,
+            'mortality_probability': mortality_prob,
+            'survival_probability': survival_prob,
+            'prediction': None,
+            'generation_time': mortality_response.get('generation_time', 0) + survival_response.get('generation_time', 0)
+        }
+        
+        # Determine final prediction from probabilities
+        if mortality_prob is not None and survival_prob is not None:
+            integrator_response['prediction'] = 1 if mortality_prob > survival_prob else 0
+            print(f"Final Prediction from probabilities: {integrator_response['prediction']} (M={mortality_prob:.3f}, S={survival_prob:.3f})")
+        elif mortality_prob is not None:
+            integrator_response['prediction'] = 1 if mortality_prob > 0.5 else 0
+            print(f"Final Prediction from mortality prob: {integrator_response['prediction']} (M={mortality_prob:.3f})")
+        elif survival_prob is not None:
+            integrator_response['prediction'] = 0 if survival_prob > 0.5 else 1
+            print(f"Final Prediction from survival prob: {integrator_response['prediction']} (S={survival_prob:.3f})")
+        
         debate_history.append(integrator_response)
-        print(f"Integration: {integrator_response.get('message', 'No response')[:200]}...")
         print(f"Final Prediction: {integrator_response.get('prediction')}")
         
         # Use integrator's prediction as the final result (no fallback to consensus)

@@ -17,7 +17,7 @@ import argparse
 sys.path.insert(0, os.getcwd())
 
 from kare_data_adapter import KAREDataAdapter
-from mortality_debate_rag import MortalityDebateSystem as MortalityDebateRAG
+from mortality_debate_rag_fast import MortalityDebateSystem as MortalityDebateRAGFast
 from mortality_debate_cot import MortalityDebateSystem as MortalityDebateCOT
 
 def calculate_metrics(results: List[Dict[str, Any]]) -> Dict[str, float]:
@@ -223,8 +223,7 @@ def run_kare_debate_evaluation(start_idx: int = 0,
                              db_dir: str = "/data/wang/junh/githubs/mirage_medrag/MedRAG/src/data/corpus",
                              round1_k: int = 8,
                              round3_k: int =8,
-                             use_fireworks: bool = False,
-                             fireworks_api_key: str = None) -> List[Dict[str, Any]]:
+                             precomputed_log_dir: str = None) -> List[Dict[str, Any]]:
     """
     Run KARE multi-agent debate evaluation.
     
@@ -244,13 +243,18 @@ def run_kare_debate_evaluation(start_idx: int = 0,
         db_dir: MedRAG database directory (only used in RAG mode)
         round1_k: Number of documents to retrieve in Round 1 (for output path naming)
         round3_k: Number of documents to retrieve in Round 3 (for output path naming)
-        use_fireworks: Use Fireworks API for agents 1-3 (only in CoT mode)
-        fireworks_api_key: Fireworks API key (if None, uses FIREWORKS_API_KEY env var)
+        precomputed_log_dir: FAST MODE - Path to directory with precomputed debate logs from agents 1-3
         
     Returns:
         List of evaluation results
     """
-    print("Initializing KARE Multi-Agent Debate Evaluation...")
+    fast_mode = precomputed_log_dir is not None
+    mode_str = "FAST MODE" if fast_mode else "FULL MODE"
+    print(f"Initializing KARE Multi-Agent Debate Evaluation ({mode_str})...")
+    
+    if fast_mode:
+        print(f"Fast Mode: Loading precomputed debate history from: {precomputed_log_dir}")
+        print(f"           Will only run integrator (agent 4) with new model")
     
     # Load existing results and check for already processed patients (only from results.json)
     existing_results, processed_patients = load_existing_results(output_path) if output_path else ([], set())
@@ -273,7 +277,7 @@ def run_kare_debate_evaluation(start_idx: int = 0,
         
         # Initialize appropriate debate system based on mode
         if debate_mode.lower() == "rag":
-            debate_system = MortalityDebateRAG(
+            debate_system = MortalityDebateRAGFast(
                 model_name=model_name, 
                 gpu_ids=gpu_ids,
                 integrator_model_name=integrator_model_name,
@@ -288,9 +292,7 @@ def run_kare_debate_evaluation(start_idx: int = 0,
                 model_name=model_name, 
                 gpu_ids=gpu_ids,
                 integrator_model_name=integrator_model_name,
-                integrator_gpu=integrator_gpu,
-                use_fireworks=use_fireworks,
-                fireworks_api_key=fireworks_api_key
+                integrator_gpu=integrator_gpu
             )
         else:
             raise ValueError(f"Invalid debate_mode: {debate_mode}. Must be 'rag' or 'cot'")
@@ -350,18 +352,31 @@ def run_kare_debate_evaluation(start_idx: int = 0,
                     })
                     
                     # Run debate with separate positive and negative similar patients
-                    # Pass the full output_path so the debate system can create logs in the same directory structure
+                    # FAST MODE: Load precomputed history, only run integrator
+                    # FULL MODE: Run all agents 1-4
                     
-                    debate_result = debate_system.debate_mortality_prediction(
-                        patient_context=sample['target_context'],
-                        positive_similars=sample['positive_similars'],
-                        negative_similars=sample['negative_similars'],
-                        medical_knowledge="",  # Can be added later if available
-                        patient_id=sample['patient_id'],  # Pass patient ID for logging
-                        model_name=model_name,  # Pass model name for structured logging
-                        output_dir=output_path,  # Pass the full output file path
-                        ground_truth=sample['ground_truth']  # Pass ground truth for fallback logic
-                    )
+                    if fast_mode:
+                        debate_result = debate_system.debate_mortality_prediction_fast(
+                            patient_context=sample['target_context'],
+                            positive_similars=sample['positive_similars'],
+                            negative_similars=sample['negative_similars'],
+                            precomputed_log_dir=precomputed_log_dir,
+                            patient_id=sample['patient_id'],
+                            model_name=integrator_model_name,  # Only integrator runs
+                            output_dir=output_path,
+                            ground_truth=sample['ground_truth']
+                        )
+                    else:
+                        debate_result = debate_system.debate_mortality_prediction(
+                            patient_context=sample['target_context'],
+                            positive_similars=sample['positive_similars'],
+                            negative_similars=sample['negative_similars'],
+                            medical_knowledge="",  # Can be added later if available
+                            patient_id=sample['patient_id'],  # Pass patient ID for logging
+                            model_name=model_name,  # Pass model name for structured logging
+                            output_dir=output_path,  # Pass the full output file path
+                            ground_truth=sample['ground_truth']  # Pass ground truth for fallback logic
+                        )
                     
                     # Combine results
                     result = {
@@ -470,10 +485,6 @@ def main():
     parser.add_argument('--batch_size', type=int, default=10, help='Batch size for intermediate saves')
     parser.add_argument('--mode', type=str, default='rag', choices=['rag', 'cot'], help='Debate mode: rag for RAG-enhanced, cot for Chain-of-Thought only')
     
-    # Fireworks API parameters (only used in CoT mode)
-    parser.add_argument('--use_fireworks', action='store_true', help='Use Fireworks API for agents 1-3 (only in CoT mode)')
-    parser.add_argument('--fireworks_api_key', type=str, default=None, help='Fireworks API key (if not set, uses FIREWORKS_API_KEY env var)')
-    
     # Retrieval parameters for structured output path
     parser.add_argument('--round1_k', type=int, default=8, help='Number of documents to retrieve in Round 1 (for output path naming)')
     parser.add_argument('--round3_k', type=int, default=8, help='Number of documents to retrieve in Round 3 (for output path naming)')
@@ -482,6 +493,9 @@ def main():
     parser.add_argument('--corpus_name', type=str, default="MedCorp2", help='MedRAG corpus name (default: MedCorp2)')
     parser.add_argument('--retriever_name', type=str, default="MedCPT", help='MedRAG retriever name (default: MedCPT)')
     parser.add_argument('--db_dir', type=str, default="/data/wang/junh/githubs/mirage_medrag/MedRAG/src/data/corpus", help='MedRAG database directory')
+    
+    # FAST MODE: Load precomputed debate history from agents 1-3, only run integrator
+    parser.add_argument('--precomputed_log_dir', type=str, default=None, help='FAST MODE: Path to directory with precomputed debate logs (debate_logs/). Only integrator will run.')
     
     args = parser.parse_args()
     
@@ -506,14 +520,12 @@ def main():
                 # Different models
                 dir_name = f"{args.mode}_mor_{clean_model_name}_int_{clean_integrator_name}_{args.retriever_name}_{args.round1_k}_{args.round3_k}"
         else:  # cot mode doesn't use retrieval parameters
-            # Add fireworks suffix if using Fireworks API
-            fireworks_suffix = "_fireworks" if args.use_fireworks else ""
             if clean_model_name == clean_integrator_name:
                 # Same model for both agents and integrator
-                dir_name = f"{args.mode}_mor_{clean_model_name}{fireworks_suffix}"
+                dir_name = f"{args.mode}_mor_{clean_model_name}"
             else:
                 # Different models
-                dir_name = f"{args.mode}_mor_{clean_model_name}_int_{clean_integrator_name}{fireworks_suffix}"
+                dir_name = f"{args.mode}_mor_{clean_model_name}_int_{clean_integrator_name}"
         
         # Create results directory structure
         results_dir = script_dir / "results" / dir_name
@@ -541,8 +553,7 @@ def main():
         db_dir=args.db_dir,
         round1_k=args.round1_k,
         round3_k=args.round3_k,
-        use_fireworks=args.use_fireworks,
-        fireworks_api_key=args.fireworks_api_key
+        precomputed_log_dir=args.precomputed_log_dir
     )
     
     print(f"Evaluation complete. {len(results)} results generated.")

@@ -4,10 +4,10 @@
 # Usage: ./convert_checkpoint.sh [checkpoint_step]
 
 # Default to latest checkpoint if not specified
-CHECKPOINT_STEP=${1:-57}
+CHECKPOINT_STEP=${1:-150}
 
-CHECKPOINT_DIR="/data/wang/junh/githubs/Debate/KARE/verl/checkpoints/global_step_${CHECKPOINT_STEP}/actor"
-OUTPUT_DIR="/data/wang/junh/githubs/Debate/KARE/verl/models/both_format_enforcer_7b_step${CHECKPOINT_STEP}"
+CHECKPOINT_DIR="/data/wang/junh/githubs/Debate/KARE/verl/checkpoints/prediction/global_step_${CHECKPOINT_STEP}/actor"
+OUTPUT_DIR="/data/wang/junh/githubs/Debate/KARE/verl/models/prediction_brier_unlabel_7b_step${CHECKPOINT_STEP}"
 
 echo "Converting checkpoint at step ${CHECKPOINT_STEP}..."
 echo "  Source: ${CHECKPOINT_DIR}"

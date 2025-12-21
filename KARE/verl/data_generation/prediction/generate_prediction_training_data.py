@@ -29,6 +29,8 @@ class PredictionDataGenerator:
                  data_split: str = 'train',
                  model_name: str = "Qwen/Qwen3-4B-Instruct-2507",
                  gpu_ids: str = "6,7",
+                 integrator_model_name: str = None,
+                 integrator_gpu: str = None,
                  rag_enabled: bool = True,
                  corpus_name: str = "MedCorp2",
                  retriever_name: str = "MedCPT",
@@ -40,6 +42,8 @@ class PredictionDataGenerator:
             data_split: Data split to use ('train' or 'val')
             model_name: Model name for agents 1-3
             gpu_ids: GPU IDs (comma-separated)
+            integrator_model_name: Model name for integrator agent (None = use model_name)
+            integrator_gpu: GPU ID for integrator model (None = use second GPU from gpu_ids)
             rag_enabled: Enable RAG retrieval
             corpus_name: MedRAG corpus name
             retriever_name: MedRAG retriever name
@@ -59,6 +63,8 @@ class PredictionDataGenerator:
         self.debate_system = MortalityDebateSystem(
             model_name=model_name,
             gpu_ids=gpu_ids,
+            integrator_model_name=integrator_model_name,
+            integrator_gpu=integrator_gpu,
             rag_enabled=rag_enabled,
             corpus_name=corpus_name,
             retriever_name=retriever_name,
@@ -139,8 +145,14 @@ class PredictionDataGenerator:
                     assessment_type='mortality'
                 )
                 
+                # VERL expects prompt as list of messages (chat format), not raw string
                 training_examples.append({
-                    'prompt': mortality_prompt,
+                    'prompt': [
+                        {
+                            'role': 'user',
+                            'content': mortality_prompt
+                        }
+                    ],
                     'data_source': 'kare_mortality_prediction',
                     'ground_truth': sample['ground_truth'],  # Keep for reference
                     'extra_info': {
@@ -161,8 +173,14 @@ class PredictionDataGenerator:
                     assessment_type='survival'
                 )
                 
+                # VERL expects prompt as list of messages (chat format), not raw string
                 training_examples.append({
-                    'prompt': survival_prompt,
+                    'prompt': [
+                        {
+                            'role': 'user',
+                            'content': survival_prompt
+                        }
+                    ],
                     'data_source': 'kare_survival_prediction',
                     'ground_truth': sample['ground_truth'],  # Keep for reference
                     'extra_info': {
@@ -197,7 +215,7 @@ class PredictionDataGenerator:
         
         Args:
             sample: Formatted patient sample from data adapter
-            log_dir: Directory for saving debate logs
+            log_dir: Base directory for saving debate logs (will create structured subdirectory)
             
         Returns:
             Dictionary with debate_history (rounds 1-3), patient context, and retrieved docs
@@ -209,10 +227,29 @@ class PredictionDataGenerator:
             import logging
             from pathlib import Path
             
-            # Setup logging
+            # Setup logging with structured directory (matching original code)
             if log_dir:
-                # Create debate_logs subdirectory for all debate-related logs
-                log_path = Path(log_dir) / "debate_logs"
+                # Create structured log directory based on model name
+                # This matches the original behavior in mortality_debate_rag.py
+                base_dir = Path(log_dir)
+                
+                # Clean model names for directory (replace / and - with _)
+                clean_model_name = self.debate_system.model_name.replace('/', '_').replace('-', '_')
+                clean_integrator_name = self.debate_system.integrator_model_name.replace('/', '_').replace('-', '_')
+                
+                # Create structured subdirectory matching the deployment naming convention
+                corpus_name = getattr(self.debate_system, 'corpus_name', 'MedCorp2')
+                retriever_name = getattr(self.debate_system, 'retriever_name', 'MedCPT')
+                k = getattr(self.debate_system, 'k', 8)
+                
+                # Include integrator model in directory name if different from main model
+                if clean_model_name == clean_integrator_name:
+                    structured_dir_name = f"rag_mor_{clean_model_name}_{retriever_name}_{k}_{k}"
+                else:
+                    structured_dir_name = f"rag_mor_{clean_model_name}_int_{clean_integrator_name}_{retriever_name}_{k}_{k}"
+                
+                log_path = base_dir / structured_dir_name / "debate_logs"
+                
                 log_path.mkdir(parents=True, exist_ok=True)
                 log_filename = log_path / f"debate_responses_{sample['patient_id']}.log"
                 logger = logging.getLogger(f"debate_{sample['patient_id']}")
@@ -223,8 +260,10 @@ class PredictionDataGenerator:
                 file_handler.setFormatter(formatter)
                 logger.addHandler(file_handler)
                 logger.info(f"Starting debate for patient {sample['patient_id']}")
+                print(f"Saving logs to: {log_path}")
             else:
                 logger = None
+                log_path = None
             
             debate_history = []
             similar_patients_dict = {
@@ -386,6 +425,42 @@ Start by calling retrieve() to gather medical evidence:"""
         
         return "\n\n".join(formatted_docs)
     
+    def _strip_binary_predictions(self, text: str) -> str:
+        """
+        Remove binary prediction labels (\boxed{0} or \boxed{1}) from debate history.
+        This prevents the model from learning to output binary 0.0 or 1.0 instead of continuous probabilities.
+        
+        Args:
+            text: Debate history text
+            
+        Returns:
+            Text with binary predictions removed
+        """
+        import re
+        
+        # Remove patterns like:
+        # **PREDICTION:**\n\boxed{1} - MORTALITY (patient WILL die in next visit)
+        # **PREDICTION:**\n\boxed{0} - SURVIVAL (patient will NOT die in next visit)
+        
+        # Pattern 1: Remove entire PREDICTION section with boxed labels
+        text = re.sub(
+            r'\*\*PREDICTION:\*\*\s*\n\s*\\boxed\{[01]\}\s*-\s*(MORTALITY|SURVIVAL).*?(?=\n\n|\n[A-Z]|$)',
+            '',
+            text,
+            flags=re.DOTALL
+        )
+        
+        # Pattern 2: Remove standalone boxed predictions
+        text = re.sub(r'\\boxed\{[01]\}', '', text)
+        
+        # Pattern 3: Remove "PREDICTION:" headers if they still exist
+        text = re.sub(r'\*\*PREDICTION:\*\*\s*\n', '', text)
+        
+        # Clean up extra whitespace
+        text = re.sub(r'\n\n\n+', '\n\n', text)
+        
+        return text.strip()
+    
     def _construct_integrator_prompt(self, 
                                     sample: Dict[str, Any], 
                                     debate_result: Dict[str, Any], 
@@ -394,10 +469,13 @@ Start by calling retrieve() to gather medical evidence:"""
         Construct the exact integrator prompt that will be used during GRPO training.
         This EXACTLY replicates the prompt from mortality_debate_rag.py Step 1c/2c (mortality_reasoning_prompt/survival_reasoning_prompt).
         
+        CRITICAL: Binary predictions (\boxed{0} or \boxed{1}) are REMOVED from debate history
+        to prevent the model from learning to output only 0.0 or 1.0 instead of continuous probabilities.
+        
         The prompt includes:
         1. System prompt with tool definition
         2. Primary context (## Target Patient EHR Context ##)
-        3. Previous debate analysis
+        3. Previous debate analysis (WITHOUT binary predictions)
         4. "You called: retrieve(query)" - simulating the tool call
         5. Retrieved Evidence
         6. Final instruction to provide probability
@@ -414,6 +492,9 @@ Start by calling retrieve() to gather medical evidence:"""
         debate_history_text = self.debate_system._prepare_integrator_history(
             debate_result['debate_history']
         )
+        
+        # CRITICAL FIX: Remove binary predictions to prevent 0.0/1.0 output issue
+        debate_history_text = self._strip_binary_predictions(debate_history_text)
         
         # Get the appropriate system prompt based on assessment type
         if assessment_type == 'mortality':
@@ -572,6 +653,10 @@ def main():
                        help='Model name for agents 1-3')
     parser.add_argument('--gpus', type=str, default='3,4',
                        help='GPU IDs (comma-separated)')
+    parser.add_argument('--integrator_model', type=str, default=None,
+                       help='Model name for integrator agent (None = use --model)')
+    parser.add_argument('--integrator_gpu', type=str, default=None,
+                       help='GPU ID for integrator model (None = use second GPU from --gpus)')
     parser.add_argument('--no_rag', action='store_true',
                        help='Disable RAG retrieval')
     parser.add_argument('--corpus_name', type=str, default='MedCorp2',
@@ -595,6 +680,8 @@ def main():
         data_split=args.split,
         model_name=args.model,
         gpu_ids=args.gpus,
+        integrator_model_name=args.integrator_model,
+        integrator_gpu=args.integrator_gpu,
         rag_enabled=not args.no_rag,
         corpus_name=args.corpus_name,
         retriever_name=args.retriever_name,

@@ -856,3 +856,90 @@ survival_prob = result['final_survival_probability']    # Better calibrated!
 2. Train format enforcement (Phase 1) → 95%+ format success
 3. Train prediction accuracy (Phase 2 from Phase 1 checkpoint) → Calibrated probabilities
 4. Deploy combined model → Reliable structure + accurate predictions
+
+---
+
+# Updated Reward Function: Aggressive Brier Score
+
+## 🎯 New Reward Logic (December 2025)
+
+The prediction reward function has been updated from discrete threshold-based rewards to a **continuous Brier score with aggressive penalty** to address the issue of sparse training signals.
+
+### Problem with Original Reward Function
+
+The original threshold-based approach suffered from:
+- **Sparse signals**: Most predictions fell into "uncertain" zones (reward = 0.0)
+- **Weak penalties**: Bad predictions (e.g., 70% survival for mortality patients) received barely positive rewards (+0.02)
+- **Limited gradient information**: Discrete thresholds provided poor optimization signals
+
+### New Brier-Based Reward Function
+
+**Formula**: `r = max(-1, min(1, 1 - 4(p - y)²))`
+
+Where:
+- `p` = predicted probability (mortality or survival based on assessment_type)
+- `y` = target value:
+  - Mortality assessment: `y = ground_truth` (0=survival, 1=mortality)
+  - Survival assessment: `y = 1 - ground_truth` (1=survival, 0=mortality)
+
+### Key Improvements
+
+| Aspect | Original Approach | New Brier Approach |
+|--------|-------------------|---------------------|
+| **Signal Type** | Discrete (-1/0/+1) | Continuous (clamped to [-1,+1]) |
+| **Bad Predictions** | +0.02 (barely positive!) | -0.96 (strong penalty) |
+| **Random Predictions** | +0.5 (misleading) | 0.0 (neutral) |
+| **Gradient Quality** | Sparse (many zeros) | Rich (non-zero everywhere) |
+| **Training Stability** | Poor (sparse rewards) | Good (continuous signals) |
+
+### Reward Characteristics
+
+```python
+# Perfect predictions (p = y)
+mortality_patient_100pct_mortality = +1.0  # ✅
+survival_patient_0pct_mortality = +1.0     # ✅
+
+# Good predictions (error ≈ 0.1) 
+mortality_patient_90pct_mortality = +0.64  # ✅ Still rewarded
+survival_patient_10pct_mortality = +0.64   # ✅ Still rewarded
+
+# Random predictions (error = 0.25)
+any_patient_50pct_probability = 0.0        # Neutral (encourages exploration)
+
+# Bad predictions (error ≈ 0.5)
+mortality_patient_70pct_survival = -0.96   # ❌ Strong penalty (was +0.02!)
+survival_patient_70pct_mortality = -0.96   # ❌ Strong penalty (was +0.02!)
+
+# Worst predictions (error = 1.0)
+mortality_patient_0pct_mortality = -1.0    # ❌ Maximum penalty
+survival_patient_100pct_mortality = -1.0   # ❌ Maximum penalty
+```
+
+### Benefits
+
+1. **Continuous Signal**: Non-zero gradients everywhere enable stable RL optimization
+2. **Proper Penalties**: Bad predictions now receive strong negative rewards (-0.96 vs +0.02)
+3. **Neutral Random**: 50% predictions get exactly 0.0 reward (neither encouraging nor discouraging)
+4. **Aggressive but Fair**: Strong penalty for large errors, good rewards for accurate predictions
+5. **Training Stability**: Clamped to [-1, +1] prevents extreme values during training
+
+### Implementation
+
+The updated reward function is implemented in `reward_score/kare_prediction_reward.py`:
+
+```python
+# Convert ground truth and probability to same scale
+if assessment_type == 'mortality':
+    y = float(ground_truth)  # 0 for survival, 1 for mortality
+    p = extracted_mortality_prob
+else:  # survival assessment  
+    y = 1.0 - float(ground_truth)  # 1 for survival, 0 for mortality
+    p = extracted_survival_prob
+
+# Aggressive Brier score with clamping
+brier_error = (p - y) ** 2
+raw_reward = 1.0 - 4.0 * brier_error
+reward = max(-1.0, min(1.0, raw_reward))  # Clamp to [-1, +1]
+```
+
+This provides much better training signals for GRPO optimization while maintaining the continuous nature required for stable reinforcement learning.
