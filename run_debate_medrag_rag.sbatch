@@ -54,14 +54,18 @@ export PYTHONDONTWRITEBYTECODE=1
 
 # --- KARE mortality debate (RAG mode with MedRAG) ---
 # Uses defaults: MedCorp2 / MedCPT / db_dir, round1_k=8, round3_k=16
+# FAST MODE: Uses precomputed debate logs from agents 1-3, only runs integrator (agent 4)
+PRECOMPUTED_LOGS="/projects/slmreasoning/junh/Debate/KARE/results/rag_mor_Qwen_Qwen2.5_7B_Instruct_MedCPT_8_8/debate_logs"
+
 stdbuf -oL -eL conda run -p "$ENV_PATH" --no-capture-output \
-  python -u KARE/run_kare_debate_mortality.py \
+  python -u KARE/run_kare_debate_mortality_fast.py \
     --mode rag \
     --gpus 0,1 \
     --integrator_model Qwen/Qwen3-30B-A3B-Instruct-2507 \
     --integrator_gpu 1 \
     --model Qwen/Qwen2.5-7B-Instruct \
     --db_dir /projects/slmreasoning/junh/mirage_medrag/MedRAG/src/data/corpus \
+    --precomputed_log_dir "$PRECOMPUTED_LOGS" \
     --output /projects/slmreasoning/junh/Debate/KARE/results/rag_mor_Qwen2.5_3-70b_8_16/kare_debate_mortality_results.json \
   2>&1 | tee -a "$LOG_FILE"
 

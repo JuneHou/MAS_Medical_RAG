@@ -822,7 +822,7 @@ CONCISE SUMMARY  6000 tokens max):
                                   patient_id: str = "unknown",
                                   log_dir: str = None) -> Dict[str, Any]:
         """
-        Execute a single integrator attempt (extracted from original method for retry logic).
+        Execute a single integrator attempt using combined mortality and survival assessment.
         
         Returns:
             Integrator response with mortality and survival probabilities
@@ -840,26 +840,29 @@ CONCISE SUMMARY  6000 tokens max):
         if medical_knowledge:
             secondary_context += f"\n## Medical Knowledge ##\n{medical_knowledge}"
         
-        # Step 1: Mortality Assessment with Tool Calling
-        print("Step 1: Assessing mortality probability with tool calling...")
+        # Single Step: Combined Assessment with Tool Calling
+        print("Combined Assessment: Evaluating both mortality and survival probabilities...")
         if logger:
-            logger.info("INTEGRATOR STEP 1: Starting mortality assessment")
-        mortality_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_mortality"]}
+            logger.info("INTEGRATOR: Starting combined assessment")
+            
+        combined_prompt = f"""{self.agent_prompts["balanced_clinical_integrator"]}
 
 {primary_context}
 
 ## Previous Debate Analysis ##
 {history_text}
 
-Start by calling retrieve() to gather medical evidence:"""
+{secondary_context}
+
+Start by calling retrieve() to gather relevant medical evidence:"""
 
         try:
             start_time = time.time()
             
-            # Step 1a: Generate tool call for mortality assessment
-            mortality_tool_response = self.integrator_llm(
-                mortality_prompt,
-                max_tokens=32768,  # Focused on tool call generation
+            # Step 1: Generate tool call
+            tool_response = self.integrator_llm(
+                combined_prompt,
+                max_tokens=32768,
                 temperature=0.3,
                 top_p=0.9,
                 return_format='string',
@@ -868,278 +871,148 @@ Start by calling retrieve() to gather medical evidence:"""
                 enable_thinking=True
             )
             
-            # Step 1b: Parse tool call
-            tool_name, mortality_query = self._parse_tool_call(mortality_tool_response)
+            # Step 2: Parse tool call
+            tool_name, query = self._parse_tool_call(tool_response)
             
             # Debug logging for tool call parsing
-            print(f"[DEBUG MORTALITY] Raw LLM response length: {len(mortality_tool_response)}")
-            print(f"[DEBUG MORTALITY] Raw LLM response preview: {mortality_tool_response[:500]}...")
-            print(f"[DEBUG MORTALITY] Parsed tool_name: {tool_name}")
-            print(f"[DEBUG MORTALITY] Parsed query: '{mortality_query}'")
+            print(f"[DEBUG COMBINED] Raw LLM response length: {len(tool_response)}")
+            print(f"[DEBUG COMBINED] Raw LLM response preview: {tool_response[:500]}...")
+            print(f"[DEBUG COMBINED] Parsed tool_name: {tool_name}")
+            print(f"[DEBUG COMBINED] Parsed query: '{query}'")
             if logger:
-                logger.info(f"MORTALITY RAW LLM RESPONSE: {mortality_tool_response}")
-                logger.info(f"MORTALITY PARSED TOOL CALL: tool='{tool_name}', query='{mortality_query}'")
+                logger.info(f"COMBINED RAW LLM RESPONSE: {tool_response}")
+                logger.info(f"COMBINED PARSED TOOL CALL: tool='{tool_name}', query='{query}'")
             
-            # Initialize variables to ensure they're always defined
-            mortality_retrieved_docs = []
-            mortality_full_response = ""
-            mortality_query = mortality_query or "No query parsed"
-            if tool_name == "retrieve" and mortality_query:
-                print(f"[MORTALITY] Tool call parsed: retrieve('{mortality_query}')")
+            # Initialize variables
+            retrieved_docs = []
+            full_response = ""
+            query = query or "No query parsed"
+            
+            if tool_name == "retrieve" and query:
+                print(f"[COMBINED] Tool call parsed: retrieve('{query}')")
                 
                 # Execute tool call
-                mortality_qid = f"mortality_assessment_{patient_id}"
-                mortality_retrieved_docs = self._execute_tool_call(tool_name, mortality_query, qid=mortality_qid, log_dir=log_dir)
+                qid = f"combined_assessment_{patient_id}"
+                retrieved_docs = self._execute_tool_call(tool_name, query, qid=qid, log_dir=log_dir)
                 
                 # Format retrieved docs for context
-                mortality_docs_context = self._format_retrieved_docs_for_context(mortality_retrieved_docs)
+                docs_context = self._format_retrieved_docs_for_context(retrieved_docs)
                 
-                # Step 1c: Generate full reasoning with retrieved context
-                mortality_reasoning_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_mortality"]}
+                # Step 3: Generate full reasoning with retrieved context
+                reasoning_prompt = f"""{self.agent_prompts["balanced_clinical_integrator"]}
 
 {primary_context}
 
 ## Previous Debate Analysis ##
 {history_text}
 
-You called: retrieve("{mortality_query}")
+{secondary_context}
+
+You called: retrieve("{query}")
 
 Retrieved Evidence:
-{mortality_docs_context}
+{docs_context}
 
-Now provide your complete mortality probability assessment based on the retrieved evidence:"""
+Now provide your complete assessment with BOTH probabilities based on all available evidence:"""
 
-                mortality_response = self.integrator_llm(
-                    mortality_reasoning_prompt,
-                    max_tokens=32768,  # Conservative limit within 32k total budget
+                reasoning_response = self.integrator_llm(
+                    reasoning_prompt,
+                    max_tokens=32768,
                     temperature=0.3,
                     top_p=0.9,
                     return_format='string',
-                    stop_sequences=["<|im_end|>", "</s>", "SURVIVAL PROBABILITY:", "Step 2:", "End of response.", "---"],
+                    stop_sequences=["<|im_end|>", "</s>", "End of response.", "---"],
                     repetition_penalty=1.15,
                     enable_thinking=True
                 )
                 
                 # Combine tool call and reasoning
-                mortality_full_response = f"Tool Call: retrieve(\"{mortality_query}\")\n\nRetrieved Documents: {len(mortality_retrieved_docs)} documents\n\n{mortality_response}"
+                full_response = f"Tool Call: retrieve(\"{query}\")\n\nRetrieved Documents: {len(retrieved_docs)} documents\n\n{reasoning_response}"
                 
             else:
-                print(f"[MORTALITY] No valid tool call found, using direct reasoning")
-                mortality_full_response = mortality_tool_response
+                print(f"[COMBINED] No valid tool call found, using direct reasoning")
+                full_response = tool_response
             
-            # Extract mortality probability from the final response
-            mortality_prob = None
-            mortality_match = re.search(r'MORTALITY PROBABILITY:\s*([0-9]*\.?[0-9]+)', mortality_full_response, re.IGNORECASE)
-            if mortality_match:
-                mortality_prob = float(mortality_match.group(1))
-                print(f"Step 1 - Extracted mortality probability: {mortality_prob}")
-            else:
-                print(f"Step 1 - FAILED to extract mortality probability")
+            # Extract both probabilities from the final response
+            extraction = self._extract_prediction_and_probabilities(full_response)
+            mortality_prob = extraction.get('mortality_probability')
+            survival_prob = extraction.get('survival_probability')
             
-            # Step 2: Survival Assessment with Tool Calling
-            print("Step 2: Assessing survival probability with tool calling...")
-            if logger:
-                logger.info("INTEGRATOR STEP 2: Starting survival assessment")
-            survival_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_survival"]}
-
-{primary_context}
-
-## Previous Debate Analysis ##
-{history_text}
-
-Start by calling retrieve() to gather medical evidence:"""
-
-            # Step 2a: Generate tool call for survival assessment
-            survival_tool_response = self.integrator_llm(
-                survival_prompt,
-                max_tokens=32768,  # Focused on tool call generation
-                temperature=0.3,
-                top_p=0.9,
-                return_format='string',
-                stop_sequences=["<|im_end|>", "</s>", "End of response.", "---"],
-                repetition_penalty=1.15,
-                enable_thinking=True
-            )
+            # Handle missing probabilities with fallback logic
+            if mortality_prob is None and survival_prob is not None:
+                print(f"[COMBINED] Only survival probability extracted: {survival_prob:.3f}")
+            elif survival_prob is None and mortality_prob is not None:
+                print(f"[COMBINED] Only mortality probability extracted: {mortality_prob:.3f}")
+            elif mortality_prob is None and survival_prob is None:
+                print(f"[COMBINED] FAILED to extract any probabilities, using defaults")
+                mortality_prob = 0.2  # Conservative default
+                survival_prob = 0.8
             
-            # Step 2b: Parse tool call
-            tool_name, survival_query = self._parse_tool_call(survival_tool_response)
-            
-            # Debug logging for tool call parsing
-            print(f"[DEBUG SURVIVAL] Raw LLM response length: {len(survival_tool_response)}")
-            print(f"[DEBUG SURVIVAL] Raw LLM response preview: {survival_tool_response[:500]}...")
-            print(f"[DEBUG SURVIVAL] Parsed tool_name: {tool_name}")
-            print(f"[DEBUG SURVIVAL] Parsed query: '{survival_query}'")
-            if logger:
-                logger.info(f"SURVIVAL RAW LLM RESPONSE: {survival_tool_response}")
-                logger.info(f"SURVIVAL PARSED TOOL CALL: tool='{tool_name}', query='{survival_query}'")
-            
-            # Initialize variables to ensure they're always defined  
-            survival_retrieved_docs = []
-            survival_full_response = ""
-            survival_query = survival_query or "No query parsed"
-            if tool_name == "retrieve" and survival_query:
-                print(f"[SURVIVAL] Tool call parsed: retrieve('{survival_query}')")
-                
-                # Execute tool call
-                survival_qid = f"survival_assessment_{patient_id}"
-                survival_retrieved_docs = self._execute_tool_call(tool_name, survival_query, qid=survival_qid, log_dir=log_dir)
-                
-                # Format retrieved docs for context
-                survival_docs_context = self._format_retrieved_docs_for_context(survival_retrieved_docs)
-                
-                # Step 2c: Generate full reasoning with retrieved context
-                survival_reasoning_prompt = f"""{self.agent_prompts["balanced_clinical_integrator_survival"]}
-
-{primary_context}
-
-## Previous Debate Analysis ##
-{history_text}
-
-You called: retrieve("{survival_query}")
-
-Retrieved Evidence:
-{survival_docs_context}
-
-Now provide your complete survival probability assessment based on the retrieved evidence:"""
-
-                survival_response = self.integrator_llm(
-                    survival_reasoning_prompt,
-                    max_tokens=32768,  # Conservative limit within 32k total budget
-                    temperature=0.3,
-                    top_p=0.9,
-                    return_format='string',
-                    stop_sequences=["<|im_end|>", "</s>", "MORTALITY PROBABILITY:", "Step 1:", "End of response.", "---"],
-                    repetition_penalty=1.15,
-                    enable_thinking=True
-                )
-                
-                # Combine tool call and reasoning
-                survival_full_response = f"Tool Call: retrieve(\"{survival_query}\")\n\nRetrieved Documents: {len(survival_retrieved_docs)} documents\n\n{survival_response}"
-                
-            else:
-                print(f"[SURVIVAL] No valid tool call found, using direct reasoning")
-                survival_full_response = survival_tool_response
-            
-            # Extract survival probability from the final response
-            survival_prob = None
-            # Try multiple patterns for probability extraction
-            survival_patterns = [
-                r'SURVIVAL PROBABILITY:\s*([0-9]*\.?[0-9]+)',  # Standard format
-                r'survival probability at around \*\*([0-9]*\.?[0-9]+)\*\*',  # Bold format
-                r'estimate.*?survival.*?([0-9]*\.?[0-9]+)',  # Estimate format
-                r'([0-9]*\.?[0-9]+).*?reflecting.*?survival',  # Contextual format
-            ]
-            
-            for pattern in survival_patterns:
-                survival_match = re.search(pattern, survival_full_response, re.IGNORECASE)
-                if survival_match:
-                    survival_prob = float(survival_match.group(1))
-                    print(f"Step 2 - Extracted survival probability: {survival_prob} (pattern: {pattern})")
-                    break
-            
-            if survival_prob is None:
-                print(f"Step 2 - FAILED to extract survival probability")
-            
-            generation_time = time.time() - start_time
-            
-            # Debug: Show what we extracted
-            print(f"DEBUG: mortality_prob = {mortality_prob}, survival_prob = {survival_prob}")
-            
-            # Report raw probabilities without normalization
+            # Report raw probabilities without normalization 
             if mortality_prob is not None and survival_prob is not None:
                 total_prob = mortality_prob + survival_prob
-                print(f"Raw probabilities: mortality={mortality_prob:.3f}, survival={survival_prob:.3f}, total={total_prob:.3f}")
-                if abs(total_prob - 1.0) > 0.01:  # Just report but don't fix
-                    print(f"WARNING: Probabilities don't sum to 1.0 (difference: {abs(total_prob - 1.0):.3f})")
+                print(f"[COMBINED] Raw probabilities: mortality={mortality_prob:.3f}, survival={survival_prob:.3f}, total={total_prob:.3f}")
+                if abs(total_prob - 1.0) > 0.01:
+                    print(f"[COMBINED] WARNING: Probabilities don't sum to 1.0 (difference: {abs(total_prob - 1.0):.3f})")
             
-            # Simple rule: compare mortality vs survival probabilities
-            if mortality_prob is not None and survival_prob is not None:
-                final_prediction = 1 if mortality_prob > survival_prob else 0
-                confidence = "High" if max(mortality_prob, survival_prob) > 0.7 else "Moderate"
-                
-                print(f"Manual determination: mortality_prob={mortality_prob:.3f}, survival_prob={survival_prob:.3f}")
-                print(f"Final prediction: {final_prediction} (confidence: {confidence})")
+            print(f"Combined Assessment - Mortality: {mortality_prob:.3f}, Survival: {survival_prob:.3f}")
+            
+            # Determine final prediction based on probabilities
+            if mortality_prob > survival_prob:
+                final_prediction = 1
+                prediction_source = f"mortality_higher ({mortality_prob:.3f} > {survival_prob:.3f})"
             else:
-                # Conservative default if probabilities still missing after retries
                 final_prediction = 0
-                confidence = "Low"
-                print(f"Missing probabilities after retries: mortality_prob={mortality_prob}, survival_prob={survival_prob} - conservative default to survival (0)")
+                prediction_source = f"survival_higher ({survival_prob:.3f} >= {mortality_prob:.3f})"
             
-            # Combine both responses with tool call information (with safe formatting)
-            try:
-                mortality_prob_str = f"{mortality_prob:.3f}" if mortality_prob is not None else 'N/A'
-                survival_prob_str = f"{survival_prob:.3f}" if survival_prob is not None else 'N/A'
-                mortality_docs_count = len(mortality_retrieved_docs) if mortality_retrieved_docs else 0
-                survival_docs_count = len(survival_retrieved_docs) if survival_retrieved_docs else 0
-                
-                combined_response = f"""## Mortality Risk Assessment ##
-{mortality_full_response}
-
-## Survival Probability Assessment ##
-{survival_full_response}
-
-## Final Integration ##
-Based on the separate tool-assisted assessments:
-- Mortality Probability: {mortality_prob_str}
-- Survival Probability: {survival_prob_str}
-- Manual Determination: {final_prediction} (Confidence: {confidence})
-- Mortality Retrieved Documents: {mortality_docs_count}
-- Survival Retrieved Documents: {survival_docs_count}"""
-            except Exception as e:
-                print(f"Error creating combined response: {e}")
-                combined_response = f"Integration completed with mortality_prob={mortality_prob}, survival_prob={survival_prob}, prediction={final_prediction}"
-
-            # Log raw response for debugging (same format as other agents)
-            log_message = f"\n{'='*50}\nRAW RESPONSE from BALANCED_CLINICAL_INTEGRATOR\n{'='*50}\nResponse type: {type(combined_response)}\nResponse length: {len(combined_response)}\nFull response: {combined_response}\n{'='*50}"
-            if logger:
-                logger.info(log_message)
+            print(f"Final determination: {final_prediction} ({prediction_source})")
             
-            # Log detailed responses for debugging
+            # Calculate total time
+            total_time = time.time() - start_time
+            
             if logger:
-                logger.info(f"MORTALITY TOOL RESPONSE: {mortality_full_response}")
-                logger.info(f"SURVIVAL TOOL RESPONSE: {survival_full_response}")
-                logger.info(f"EXTRACTED MORTALITY PROBABILITY: {mortality_prob}")
-                logger.info(f"EXTRACTED SURVIVAL PROBABILITY: {survival_prob}")
-                logger.info(f"MANUAL FINAL PREDICTION: {final_prediction}")
-                logger.info(f"MORTALITY QUERY: {mortality_query if 'mortality_query' in locals() else 'N/A'}")
-                logger.info(f"SURVIVAL QUERY: {survival_query if 'survival_query' in locals() else 'N/A'}")
-                logger.info("INTEGRATOR FUNCTION COMPLETED SUCCESSFULLY")
+                logger.info(f"COMBINED ASSESSMENT COMPLETED")
+                logger.info(f"Total generation time: {total_time:.2f}s")
+                logger.info(f"Final prediction: {final_prediction}")
+                logger.info(f"Mortality probability: {mortality_prob:.3f}")
+                logger.info(f"Survival probability: {survival_prob:.3f}")
             
             return {
-                'role': 'balanced_clinical_integrator',
-                'message': combined_response,
-                'response': combined_response,  # Add response key for compatibility
-                'prediction': final_prediction,
+                'final_prediction': final_prediction,
                 'mortality_probability': mortality_prob,
                 'survival_probability': survival_prob,
-                'confidence': confidence,
-                'generation_time': generation_time,
-                'prompt_length': len(mortality_prompt) + len(survival_prompt),
-                'response_length': len(combined_response),
-                'mortality_response': mortality_full_response,
-                'survival_response': survival_full_response,
-                'mortality_query': mortality_query if 'mortality_query' in locals() else None,
-                'survival_query': survival_query if 'survival_query' in locals() else None,
-                'mortality_retrieved_docs': mortality_retrieved_docs,  # Full documents, not just count
-                'survival_retrieved_docs': survival_retrieved_docs  # Full documents, not just count
-            }
-            
-        except Exception as e:
-            print(f"Error in integrator single-step prediction: {e}")
-            
-            error_message = f"Error occurred during single-step prediction: {str(e)}"
-            
-            # Log error response for debugging (same format as other agents)
-            log_message = f"\n{'='*50}\nRAW RESPONSE from BALANCED_CLINICAL_INTEGRATOR (ERROR)\n{'='*50}\nResponse type: <class 'str'>\nResponse length: {len(error_message)}\nFull response: {error_message}\n{'='*50}"
-            if logger:
-                logger.info(log_message)
-                logger.info(f"INTEGRATOR ERROR: {str(e)}")
-            
-            return {
+                'prediction_source': prediction_source,
+                'reasoning': f"Single-step integrator: mortality={mortality_prob:.3f}, survival={survival_prob:.3f}",
+                'rounds_completed': 4,
+                'total_generation_time': total_time,
+                'response': full_response,
                 'role': 'balanced_clinical_integrator',
-                'message': error_message,
-                'prediction': 0,  # Conservative default
-                'generation_time': 0,
+                'message': full_response,
+                'prediction': final_prediction,
+                'retrieved_docs': retrieved_docs,
+                'tool_query': query
+            }
+        
+        except Exception as e:
+            print(f"Error in integrator combined assessment: {e}")
+            import traceback
+            traceback.print_exc()
+            if logger:
+                logger.error(f"ERROR in integrator: {e}")
+            
+            # Return conservative fallback
+            return {
+                'final_prediction': 0,
+                'mortality_probability': 0.2,
+                'survival_probability': 0.8,
+                'prediction_source': 'error_fallback',
+                'reasoning': f'Error in integrator: {str(e)}',
+                'rounds_completed': 4,
+                'total_generation_time': 0.0,
+                'response': f'ERROR: {str(e)}',
+                'role': 'balanced_clinical_integrator',
+                'message': f'ERROR: {str(e)}',
+                'prediction': 0,
                 'error': str(e)
             }
     
