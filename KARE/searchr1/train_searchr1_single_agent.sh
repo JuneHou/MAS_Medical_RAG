@@ -1,9 +1,17 @@
 #!/bin/bash
 # ==============================================================================
-# Search-R1 Training for KARE Mortality Prediction - Single Agent Baseline
+# Search-R1 Training for KARE Mortality Prediction - Binary Label Match (Exp 1)
 # ==============================================================================
-# This script trains Qwen2.5-7B-Instruct using Search-R1 with RL-learned retrieval
-# for mortality prediction on balanced KARE dataset
+# This script trains Qwen2.5-7B-Instruct using Search-R1 with binary (0/1) 
+# exact match rewards for mortality prediction on balanced KARE dataset
+#
+# EXPERIMENT 1: Binary Label Match
+# - Output: <answer>0</answer> or <answer>1</answer>
+# - Reward: 1.0 if exact match, 0.0 otherwise
+# - Uses Search-R1's default qa_em.py reward function
+#
+# For EXPERIMENT 2 (Probability-Based Calibration), use:
+#   bash searchr1/train_searchr1_probability.sh
 #
 # Data: 200 train samples (100 survival, 100 mortality)
 #       50 val samples (25 survival, 25 mortality)
@@ -28,6 +36,7 @@ NUM_GPUS=$(echo $GPU_IDS | tr ',' '\n' | wc -l)  # Count GPUs
 
 echo "=========================================="
 echo "Search-R1 KARE Mortality Prediction Training"
+echo "MODE: Binary Label Match (Exp 1)"
 echo "=========================================="
 echo "Using GPU(s): $GPU_IDS (Total: $NUM_GPUS GPUs)"
 
@@ -104,7 +113,8 @@ echo "  - Val samples: $val_samples"
 echo ""
 echo "[2/3] Training configuration..."
 echo "  Model: $BASE_MODEL"
-echo "  Experiment: $EXPERIMENT_NAME"
+echo "  Exward: Binary exact match (default Search-R1 qa_em)"
+echo "  Reperiment: $EXPERIMENT_NAME"
 echo "  Retriever: $RETRIEVER_URL (topk=5)"
 echo "  GPUs: $NUM_GPUS x A40 (IDs: $GPU_IDS)"
 echo "  Checkpoints: $CHECKPOINT_DIR"
@@ -158,7 +168,7 @@ PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.35 \
     actor_rollout_ref.rollout.enforce_eager=true \
     actor_rollout_ref.rollout.n_agent=1 \
-    actor_rollout_ref.rollout.temperature=1.0 \
+    actor_rollout_ref.rollout.temperature=1 \
     actor_rollout_ref.ref.log_prob_micro_batch_size=4 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.no_think_rl=false \

@@ -1,42 +1,93 @@
 # Running Search-R1 on SLURM with Local Retriever
 
-This guide explains how to run Search-R1 training on SLURM clusters **without requiring HTTP servers** by using an in-process MedRAG retriever.
-
----
-
-## Problem with HTTP Servers on SLURM
-
-**Original Setup:**
-```bash
-# Terminal 1: Start MedRAG HTTP server
-python medrag_retrieval_server.py --port 8000
-
-# Terminal 2: Run training
-bash train_searchr1_single_agent.sh
-```
-
-**Issues:**
-- ❌ SLURM jobs can't easily run background services
-- ❌ Port conflicts across multiple jobs
-- ❌ Network connectivity between compute nodes
-- ❌ Manual server management
-
----
+This guide explains how to run Search-R1 training on SLURM clusters **without requiring HTTP servers or external processes** by using an in-process MedRAG retriever.
 
 ## Solution: In-Process Local Retriever
 
-**New Setup:**
+**New Setup (USE THIS):**
 ```bash
-# Single command - everything in one job!
+# Single command - no servers, no ports, no problems!
 sbatch train_searchr1_slurm.sbatch
 ```
 
-**Benefits:**
-- ✅ No HTTP server needed
-- ✅ MedRAG runs on dedicated GPU within job
+**How it works:**
+- ✅ MedRAG loads directly into training process on GPU 3
+- ✅ Retrieval happens via function calls (not HTTP)
 - ✅ Self-contained SLURM job
-- ✅ No port conflicts
-- ✅ Easier to scale
+- ✅ No port conflicts or networking issues
+- ✅ Automatic cleanup when job ends
+
+---
+
+## Environment Setup on SLURM Server
+
+### Step 0: Install Search-R1 Environment
+
+**On your SLURM cluster (e.g., tinkercliffs), run:**
+
+```bash
+# 1. Clone Search-R1
+cd /projects/slmreasoning/$USER
+git clone https://github.com/FUDAN-FUEX/Search-R1.git
+cd Search-R1
+
+# 2. Create conda environment
+conda create -n searchr1 python=3.10 -y
+conda activate searchr1
+
+# 3. Install Search-R1 requirements
+pip install -e .
+
+# 4. Install additional dependencies
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install vllm==0.6.1.post2  # MUST match Search-R1's version
+pip install ray==2.10.0
+pip install wandb
+pip install pandas pyarrow
+pip install transformers accelerate
+pip install flash-attn --no-build-isolation
+
+# 5. Install MedRAG dependencies
+pip install faiss-gpu sentence-transformers
+pip install nltk scikit-learn
+
+# 6. Verify installation
+python -c "import vllm; print('vLLM version:', vllm.__version__)"
+python -c "import torch; print('PyTorch version:', torch.__version__)"
+python -c "import ray; print('Ray version:', ray.__version__)"
+```
+
+**Critical version requirements:**
+- `vllm==0.6.1.post2` (exact version for Search-R1 compatibility)
+- `ray==2.10.0` or later
+- `torch>=2.0.0` with CUDA 12.1
+- `transformers>=4.40.0`
+
+### Copy Required Files to SLURM Server
+
+```bash
+# From your local machine
+LOCAL_DIR=/data/wang/junh/githubs/Debate/KARE/searchr1
+REMOTE_HOST=junh@tinkercliffs1.arc.vt.edu
+REMOTE_DIR=/projects/slmreasoning/junh/Search-R1-Training
+
+# 1. Copy training scripts
+scp $LOCAL_DIR/train_searchr1_slurm.sbatch $REMOTE_HOST:$REMOTE_DIR/
+scp $LOCAL_DIR/local_medrag_retriever.py $REMOTE_HOST:$REMOTE_DIR/
+
+# 2. Copy training data
+scp $LOCAL_DIR/data/kare_mortality_single_agent/*.parquet $REMOTE_HOST:$REMOTE_DIR/data/
+
+# 3. Copy patched generation.py (IMPORTANT!)
+scp /data/wang/junh/githubs/Search-R1/search_r1/llm_agent/generation.py \
+    $REMOTE_HOST:/projects/slmreasoning/junh/Search-R1/search_r1/llm_agent/
+
+# 4. Copy MedRAG corpus (if not already there)
+# This is a large file (~20GB), only copy once
+rsync -avz --progress \
+    /data/wang/junh/githubs/mirage_medrag/MedRAG/src/data/corpus/ \
+    $REMOTE_HOST:$REMOTE_DIR/medrag_corpus/
+```
 
 ---
 
@@ -95,29 +146,43 @@ cp /data/wang/junh/githubs/Debate/KARE/searchr1/patch_searchr1_local_retriever.p
 # Manually merge the _batch_search method into generation.py
 ```
 
-### Step 2: Verify Files Exist
+### Step 2: Verify Files on SLURM Server
 
+**SSH into your SLURM cluster:**
 ```bash
-cd /data/wang/junh/githubs/Debate/KARE/searchr1
-
-# Check local retriever implementation
-ls -lh local_medrag_retriever.py
-
-# Check SLURM script
-ls -lh train_searchr1_slurm.sbatch
-
-# Check training data
-ls -lh data/kare_mortality_single_agent/*.parquet
+ssh junh@tinkercliffs1.arc.vt.edu
+cd /projects/slmreasoning/junh/Search-R1-Training
 ```
 
-### Step 3: Configure GPU Allocation
+**Check all required files:**
+```bash
+# 1. Patched Search-R1 generation.py
+ls -lh /projects/slmreasoning/junh/Search-R1/search_r1/llm_agent/generation.py
+# Should show recent modification date after scp
 
-Edit `train_searchr1_slurm.sbatch` if needed:
+# 2. Local retriever implementation
+ls -lh localUpdate Paths in SLURM Script
 
+**Edit `train_searchr1_slurm.sbatch` to match your server paths:**
+
+```bash
+# Line ~42: Update base paths
+export BASE_MODEL='Qwen/Qwen2.5-7B-Instruct'
+export DATA_DIR='/projects/slmreasoning/junh/Search-R1-Training/data'
+export CHECKPOINT_DIR='/projects/slmreasoning/junh/Search-R1-Training/checkpoints'
+export ROLLOUT_DATA_DIR='/projects/slmreasoning/junh/Search-R1-Training/rollout_data'
+
+# Line ~168: Update corpus path for local retriever
++retriever.corpus_name=MedCorp \
++retriever.retriever_name=MedCPT \
++retriever.db_dir=/projects/slmreasoning/junh/Search-R1-Training/medrag_corpus \
+```
+
+**GPU allocation (usually no changes needed):**
 ```bash
 #SBATCH --gpus-per-node=4  # Request 4 GPUs
 
-# GPU allocation in the script:
+# In script:
 export CUDA_VISIBLE_DEVICES=0,1,2,3  # All 4 GPUs
 export RETRIEVER_GPU=3               # Last GPU for retrieval
 export NUM_TRAIN_GPUS=3              # First 3 GPUs for training
@@ -125,6 +190,63 @@ export NUM_TRAIN_GPUS=3              # First 3 GPUs for training
 
 **GPU Usage:**
 - **GPU 0-2**: Training (Qwen2.5-7B model, FSDP, vLLM rollout)
+- **GPU 3**: MedRAG retrieval (MedCPT encoder + corpus search)
+- **NO HTTP server running on any port!**
+```bash
+conda activate searchr1
+
+# Check packages
+python -c "import vllm; print('vLLM:', vllm.__version__)"  
+# Should print: vLLM: 0.6.1.post2
+
+python -c "import ray; print('Ray:', ray.__version__)"
+# Should print: Ray: 2.10.0
+
+python -c "from local_medrag_retriever import get_retriever; print('MedRAG: OK')"
+# Should print: MedRAG: OK (if paths are correct)
+```
+
+### Step 3: Configure GPU Allocation
+
+Edit `train_searchr1_slurm.sbatch` if needed:
+
+**On the SLURM cluster:**
+
+```bash
+cd /projects/slmreasoning/junh/Search-R1-Training
+
+# Activate environment
+conda activate searchr1
+
+# Create log directory
+mkdir -p logs
+
+# Submit job (NO HTTP server needed!)
+sbatch train_searchr1_slurm.sbatch
+
+# Check status
+squeue -u $USER
+
+# Monitor output
+tail -f logs/searchr1_kare_<JOB_ID>.out
+
+# Watch for the retriever initialization message:
+# "[Search-R1] Initializing local MedRAG retriever on GPU 3..."
+# "[Search-R1] Local retriever ready!"
+```
+
+**What you should see in logs:**
+```
+[DEBUG] Logger initialized: <Tracking object>, backends: ['console', 'wandb']
+[DEBUG] Skipping pre-training validation (val_before_train=False)
+[DEBUG] Creating generation config...
+[Search-R1] Initializing local MedRAG retriever on GPU 3...
+[Search-R1] Local retriever ready!
+[DEBUG] Starting training loop: 5 epochs
+[DEBUG] ===== Epoch 0 =====
+epoch 0, step 1
+[DEBUG] Processing batch, will call logger.log() at end of step
+[DEBUG] Calling logger.log() with 45 metrics at step 1el, FSDP, vLLM rollout)
 - **GPU 3**: MedRAG retrieval (MedCPT encoder + corpus search)
 
 ### Step 4: Submit SLURM Job
@@ -166,26 +288,76 @@ python medrag_retrieval_server.py --port 8000 &
 +retriever.corpus_name=MedCorp  # Corpus to use
 +retriever.retriever_name=MedCPT # Retriever model
 retriever.topk=5                 # Same as before
+Do I need to run the HTTP server?"
 
-# No external server needed!
+**Answer:** **NO!** The whole point of local retriever mode is to avoid HTTP servers.
+
+**Don't run:**
+```bash
+python medrag_retrieval_server.py --port 8000  # DON'T DO THIS
 ```
 
----
+**Just submit the job:**
+```bash
+sbatch train_searchr1_slurm.sbatch  # THIS IS ALL YOU NEED
+```
 
+### Issue: "ModuleNotFoundError: No module named 'medrag'"
+
+**Solution:** Ensure MedRAG paths are correct in `local_medrag_retriever.py`:
+```python
+# Update line 9 to match your server path:
+sys.path.insert(0, '/projects/slmreasoning/junh/mirage_medrag/MedRAG/src')
+```
+
+### Issue: "vllm version mismatch"
+
+**Problem:** Search-R1 requires `vllm==0.6.1.post2` but you have a different version.
+
+**Solution:**
+```bash
+conda activate searchr1
+pip uninstall vllm -y
+pip install vllm==0.6.1.post2
+python -c "import vllm; print(vllm.__version__)"  # Should print 0.6.1.post2
 ## How It Works
+ and update path in sbatch script:
+```bash
+# Check corpus exists
+ls /projects/slmreasoning/junh/Search-R1-Training/medrag_corpus/
+# Should contain: MedCorp/ and MedCPT/ directories
 
+# Update train_searchr1_slurm.sbatch line ~168:
++retriever.db_dir=/projects/slmreasoning/junh/Search-R1-Training/medrag_corpus \
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ SLURM Job (Single Process)                                   │
-├──────────────────────────────────────────────────────────────┤
-│                                                               │
-│  GPU 0-2: Search-R1 Training                                 │
-│  ├── vLLM rollout generation                                 │
-│  ├── FSDP actor/critic training                             │
-│  └── PPO updates                                             │
-│                                                               │
-│  GPU 3: MedRAG Retrieval (In-Process)                       │
-│  ├── LocalMedRAGRetriever loaded once                       │
+
+### Issue: Training still tries to connect to HTTP server
+
+**Solution 1:** Verify `generation.py` patch was applied:
+```bash
+# On SLURM server:
+grep "use_local = getattr" /projects/slmreasoning/junh/Search-R1/search_r1/llm_agent/generation.py
+# Should return the line from patched _batch_search method
+```
+
+**Solution 2:** Verify config includes `+retriever.local=true`:
+```bash
+# In train_searchr1_slurm.sbatch, verify these lines exist:
++retriever.local=true \
++retriever.gpu_id=$RETRIEVER_GPU \
++retriever.corpus_name=MedCorp \
+```
+
+### Issue: "ImportError: cannot import name 'get_retriever'"
+
+**Solution:** Ensure `local_medrag_retriever.py` is in the right location:
+```bash
+# File should be in the same directory as sbatch script
+ls -lh /projects/slmreasoning/junh/Search-R1-Training/local_medrag_retriever.py
+
+# Or update the path in generation.py line ~467:
+sys.path.insert(0, '/projects/slmreasoning/junh/Search-R1-Training')
+from local_medrag_retriever import get_retriever once                       │
 │  ├── Called directly by generation.py                        │
 │  └── No HTTP/network overhead                                │
 │                                                               │
@@ -209,29 +381,71 @@ retriever.topk=5                 # Same as before
 
 ### Issue: "ModuleNotFoundError: No module named 'medrag'"
 
-**Solution:** Ensure MedRAG paths are correct:
-```python
-# In local_medrag_retriever.py, line 9
-sys.path.insert(0, '/data/wang/junh/githubs/mirage_medrag/MedRAG/src')
-```
+**SComplete Checklist Before Submitting Job
 
-### Issue: "CUDA out of memory on GPU 3"
+On your SLURM cluster, verify:
 
-**Solution:** Reduce retriever batch size or use CPU:
-```python
-# In local_medrag_retriever.py, modify __init__:
-self.device = f"cpu"  # Use CPU instead of GPU
-```
+- [ ] **Environment created:** `conda activate searchr1` works
+- [ ] **vLLM version correct:** `python -c "import vllm; print(vllm.__version__)"` shows `0.6.1.post2`
+- [ ] **Patched generation.py copied:** Recent timestamp on `Search-R1/search_r1/llm_agent/generation.py`
+- [ ] **Local retriever exists:** `ls local_medrag_retriever.py` found
+- [ ] **Training data exists:** `ls data/train.parquet data/val.parquet` found
+- [ ] **MedRAG corpus exists:** `ls medrag_corpus/MedCorp/` shows files
+- [ ] **Paths updated in sbatch:** All paths point to your server directories
+- [ ] **NO HTTP server running:** You should NOT have `medrag_retrieval_server.py` running
 
-### Issue: "Retriever not found: MedCPT"
+---
 
-**Solution:** Check corpus directory:
+## Quick Start (TL;DR)
+
+**On SLURM cluster:**
 ```bash
-ls /data/wang/junh/githubs/mirage_medrag/MedRAG/src/data/corpus
-# Should contain MedCorp/ and MedCPT model files
+# 1. Setup (one-time)
+cd /projects/slmreasoning/junh/Search-R1-Training
+conda activate searchr1
+
+# 2. Verify environment
+python -c "import vllm; print('vLLM:', vllm.__version__)"  # Should be 0.6.1.post2
+
+# 3. Submit job (NO HTTP SERVER NEEDED!)
+sbatch train_searchr1_slurm.sbatch
+
+# 4. Monitor
+tail -f logs/searchr1_kare_*.out
 ```
 
-### Issue: Training still tries to connect to HTTP server
+**You should see:**
+```
+[Search-R1] Initializing local MedRAG retriever on GPU 3...
+[Search-R1] Local retriever ready!
+[DEBUG] Starting training loop: 5 epochs
+epoch 0, step 1
+[DEBUG] Calling logger.log() with 45 metrics at step 1
+```
+
+**WandB dashboard:**
+- Project: `searchr1-kare-mortality`
+- Should show training metrics (rewards, losses, KL divergence)
+- NO more "system charts only" issue!
+
+---
+
+## FAQ
+
+**Q: Do I need to run `medrag_retrieval_server.py`?**  
+A: **NO!** Local retriever runs inside the training process.
+
+**Q: What port should I use?**  
+A: **None!** No HTTP server = no ports.
+
+**Q: Can I run this on multiple nodes?**  
+A: Yes, each node will have its own local retriever on GPU 3.
+
+**Q: How do I know the retriever is working?**  
+A: Look for `[Search-R1] Local retriever ready!` in logs.
+
+**Q: What if I get vLLM version errors?**  
+A: Reinstall exact version: `pip install vllm==0.6.1.post2ssue: Training still tries to connect to HTTP server
 
 **Solution:** Verify config includes `+retriever.local=true`:
 ```bash

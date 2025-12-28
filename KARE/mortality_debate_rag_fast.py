@@ -125,14 +125,13 @@ class MortalityDebateSystem:
             print("Using same model for integrator")
             self.integrator_llm = self.llm
         
-        # Agent configuration - Four specialized agents
+        # Agent configuration - Three specialized agents
         self.agent_roles = [
-            "target_patient_analyst",
             "mortality_risk_assessor", 
             "protective_factor_analyst",
             "balanced_clinical_integrator"
         ]
-        self.max_rounds = 3
+        self.max_rounds = 2
         
         # System prompts for each agent
         self.agent_prompts = self._initialize_agent_prompts()
@@ -141,32 +140,6 @@ class MortalityDebateSystem:
         """Initialize specialized prompts for each agent role."""
         
         return {
-            "target_patient_analyst": """You are a medical AI analyzing a patient's EHR to predict mortality risk in their NEXT hospital visit.
-
-IMPORTANT: Mortality is rare - only predict death (1) if evidence STRONGLY supports it. When uncertain, predict survival (0).
-
-Analyze the patient data and provide:
-
-**CLINICAL SUMMARY:**
-Briefly summarize the patient's main conditions, treatments, and clinical trajectory.
-
-**RISK FACTORS (that increase death risk):**
-1. [Risk factor 1]: [Brief explanation]
-2. [Risk factor 2]: [Brief explanation]  
-3. [Risk factor 3]: [Brief explanation]
-
-**PROTECTIVE FACTORS (that support survival):**
-1. [Protective factor 1]: [Brief explanation]
-2. [Protective factor 2]: [Brief explanation]
-3. [Protective factor 3]: [Brief explanation]
-
-**ASSESSMENT:**
-Based on the balance of risk vs protective factors, explain your reasoning (2-3 sentences).
-
-**PREDICTION:**
-\\boxed{0} - SURVIVAL (patient will NOT die in next visit)
-\\boxed{1} - MORTALITY (patient WILL die in next visit)""",
-
             "mortality_risk_assessor": """You are a medical AI that analyzes mortality risk factors. Review the target patient and similar patients who died to identify key risk factors.
 
 **MORTALITY RISK ANALYSIS:**
@@ -200,6 +173,8 @@ Explain (2-3 sentences) how these factors collectively support patient survival 
 **NOTE:** Do not make final predictions - only analyze protective factors.""",
 
             "balanced_clinical_integrator": """You are a medical AI Clinical Assistant analyzing mortality and survival probabilities for the NEXT hospital visit.
+
+IMPORTANT: Mortality is rare - only predict mortality if evidence STRONGLY supports it. When uncertain, predict survival.
 
 Available tools:
 - retrieve(query): Retrieve medical evidence for your assessment
@@ -434,9 +409,7 @@ CONCISE SUMMARY  6000 tokens max):
             prediction = entry.get('prediction', 'None')
             
             # Determine round type for appropriate summarization
-            if role == "target_patient_analyst":
-                round_name = "target_analysis"
-            elif role == "mortality_risk_assessor":
+            if role == "mortality_risk_assessor":
                 round_name = "risk_assessment"
             elif role == "protective_factor_analyst":
                 round_name = "protective_analysis"
@@ -707,10 +680,9 @@ CONCISE SUMMARY  6000 tokens max):
         
         print(f"Loading precomputed debate history from: {log_file}")
         
-        # Parse the log file to extract agent responses
+        # Parse the log file to extract agent responses (skip first agent - target_patient_analyst)
         debate_history = []
         agent_roles = [
-            ("TARGET_PATIENT_ANALYST", "target_patient_analyst"),
             ("MORTALITY_RISK_ASSESSOR", "mortality_risk_assessor"),
             ("PROTECTIVE_FACTOR_ANALYST", "protective_factor_analyst")
         ]
@@ -719,10 +691,8 @@ CONCISE SUMMARY  6000 tokens max):
             log_content = f.read()
         
         for log_marker, role_name in agent_roles:
-            # Find the response section for this agent
-            pattern = f"RAW RESPONSE from {log_marker}\\n" + "=" * 50 + "\\n(.+?)\\n" + "=" * 50
-            if log_marker != "TARGET_PATIENT_ANALYST":
-                pattern = f"BATCH RESPONSE from {log_marker}\\n" + "=" * 50 + "\\n(.+?)\\n" + "=" * 50
+            # Find the response section for this agent (both use BATCH RESPONSE format)
+            pattern = f"BATCH RESPONSE from {log_marker}\\n" + "=" * 50 + "\\n(.+?)\\n" + "=" * 50
             
             match = re.search(pattern, log_content, re.DOTALL)
             if not match:
@@ -751,11 +721,6 @@ CONCISE SUMMARY  6000 tokens max):
                 'message': response_text,
                 'timestamp': time.time()
             }
-            
-            # Extract prediction if present (for target_analyst)
-            if role_name == "target_patient_analyst":
-                pred_result = self._extract_prediction_and_probabilities(response_text)
-                debate_entry['prediction'] = pred_result.get('prediction')
             
             debate_history.append(debate_entry)
             print(f"Loaded {role_name}: {len(response_text)} chars")
@@ -1051,7 +1016,7 @@ Now provide your complete assessment with BOTH probabilities based on all availa
             print(f"Building prompt for {role.upper()}...")
             
             # Get system prompt for this role
-            system_prompt = self.agent_prompts.get(role, self.agent_prompts["target_patient_analyst"])
+            system_prompt = self.agent_prompts.get(role, self.agent_prompts["mortality_risk_assessor"])
             
             # Format debate history (only for agents that use it)
             history_text = ""
@@ -1067,7 +1032,7 @@ Now provide your complete assessment with BOTH probabilities based on all availa
             # Perform retrieval if RAG is enabled
             retrieved_docs = []
             retrieval_context = ""
-            if self.rag_enabled and role in ["target_patient_analyst", "mortality_risk_assessor", "protective_factor_analyst", "balanced_clinical_integrator"]:
+            if self.rag_enabled and role in ["mortality_risk_assessor", "protective_factor_analyst", "balanced_clinical_integrator"]:
                 try:
                     # Use appropriate retrieval tool for current round
                     retrieval_tool = self.retrieval_tools.get("round2", None)
@@ -1095,10 +1060,7 @@ Now provide your complete assessment with BOTH probabilities based on all availa
                     print(f"Warning: Retrieval failed for {role}: {e}")
             
             # Build context based on agent role
-            if role == "target_patient_analyst":
-                primary_context = f"## Target Patient EHR Context ##\n{patient_context}"
-                secondary_context = ""
-            elif role == "mortality_risk_assessor":
+            if role == "mortality_risk_assessor":
                 primary_context = f"## Target Patient EHR Context ##\n{patient_context}"
                 secondary_context = f"\n## Similar Mortality Cases ##\n{similar_patients.get('positive', 'None')}"
             elif role == "protective_factor_analyst":
@@ -1248,7 +1210,7 @@ Provide your clinical analysis and mortality risk assessment:"""
         print(f"\n--- {role.upper()} TURN ---")
         
         # Get system prompt for this role
-        system_prompt = self.agent_prompts.get(role, self.agent_prompts["target_patient_analyst"])
+        system_prompt = self.agent_prompts.get(role, self.agent_prompts["mortality_risk_assessor"])
         
         # Format debate history for context (only for Round 1 and Round 3 agents)
         history_text = ""
@@ -1269,18 +1231,16 @@ Provide your clinical analysis and mortality risk assessment:"""
         # Perform retrieval if RAG is enabled
         retrieved_docs = []
         retrieval_context = ""
-        if self.rag_enabled and role in ["target_patient_analyst", "mortality_risk_assessor", "protective_factor_analyst", "balanced_clinical_integrator"]:
+        if self.rag_enabled and role in ["mortality_risk_assessor", "protective_factor_analyst", "balanced_clinical_integrator"]:
             # Determine which retrieval tool to use based on role
             if role == "medical_knowledge_integrator":
                 retrieval_tool = self.retrieval_tools.get("round3")
             else:
-                retrieval_tool = self.retrieval_tools.get("round1" if role == "target_patient_analyst" else "round2")
+                retrieval_tool = self.retrieval_tools.get("round1")
             
             if retrieval_tool:
                 # Generate query based on role and available context
-                if role == "target_patient_analyst":
-                    query = self._convert_labels_in_text(patient_context)
-                elif role == "mortality_risk_assessor":
+                if role == "mortality_risk_assessor":
                     similar_positive = similar_patients.get('positive', '')
                     # Truncate similar patients if too long, but keep full patient context
                     if len(similar_positive) > 6000:
@@ -1330,10 +1290,7 @@ Provide your clinical analysis and mortality risk assessment:"""
         print(f"--- END DEBUG ---\n")
         
         # Build context based on agent role (Phase 1 restructured)
-        if role == "target_patient_analyst":
-            primary_context = f"## Target Patient EHR Context ##\n{patient_context}"
-            secondary_context = ""
-        elif role == "mortality_risk_assessor":
+        if role == "mortality_risk_assessor":
             primary_context = f"## Similar Patients with Mortality Outcomes (Died) ##\n{similar_patients.get('positive', 'No mortality cases available for analysis.')}"
             secondary_context = ""
         elif role == "protective_factor_analyst":
@@ -1367,7 +1324,6 @@ Provide your clinical analysis and mortality risk assessment:"""
             
             # Use different temperatures for each agent to promote diversity
             agent_temps = {
-                "target_patient_analyst": 0.7,
                 "mortality_risk_assessor": 0.3,
                 "protective_factor_analyst": 0.3,
                 "balanced_clinical_integrator": 0.5
@@ -1376,9 +1332,7 @@ Provide your clinical analysis and mortality risk assessment:"""
             
             # Set token limits based on debate round and role
             # Note: max_tokens is for generation (new tokens), not input context window
-            if role == "target_patient_analyst":
-                max_tokens = 32768  # Round 1: Comprehensive target analysis with full context
-            elif role in ["mortality_risk_assessor", "protective_factor_analyst"]:
+            if role in ["mortality_risk_assessor", "protective_factor_analyst"]:
                 max_tokens = 32768  # Round 2: Detailed comparison analysis with full similar patient context
             else:  # balanced_clinical_integrator
                 # Round 3: Can handle ~5-10k tokens input + generate comprehensive reasoning  
@@ -1724,24 +1678,8 @@ Provide your clinical analysis and mortality risk assessment:"""
             'negative': negative_similars
         }
         
-        # Round 1: Target Patient Analysis Only
-        print(f"\n--- ROUND 1: TARGET PATIENT ANALYSIS ---")
-        target_response = self._agent_turn(
-            role="target_patient_analyst",
-            patient_context=patient_context,
-            similar_patients=similar_patients_dict,
-            medical_knowledge=medical_knowledge,
-            debate_history=[],
-            logger=logger,
-            patient_id=patient_id,
-            log_dir=str(log_dir)
-        )
-        debate_history.append(target_response)
-        print(f"Target Analysis: {target_response.get('message', 'No response')[:200]}...")
-        print(f"Initial Prediction: {target_response.get('prediction')}")
-        
-        # Round 2: Similar Patient Comparisons (PARALLEL BATCH PROCESSING)
-        print(f"\n--- ROUND 2: SIMILAR PATIENT COMPARISONS (BATCH) ---")
+        # Round 1: Similar Patient Comparisons (PARALLEL BATCH PROCESSING)
+        print(f"\n--- ROUND 1: SIMILAR PATIENT COMPARISONS (BATCH) ---")
         
         # Process both agents in parallel using batch generation
         round2_responses = self._agent_turn_batch(
@@ -1766,8 +1704,8 @@ Provide your clinical analysis and mortality risk assessment:"""
         print(f"Risk Assessor: {positive_response.get('message', 'No response')[:200]}...")
         print(f"Protective Factor Analyst: {negative_response.get('message', 'No response')[:200]}...")
         
-        # Round 3: Integration and Final Consensus
-        print(f"\n--- ROUND 3: INTEGRATION AND CONSENSUS ---")
+        # Round 2: Integration and Final Consensus
+        print(f"\n--- ROUND 2: INTEGRATION AND CONSENSUS ---")
         integrator_response = self._agent_turn(
             role="balanced_clinical_integrator",
             patient_context=patient_context,
@@ -1788,13 +1726,13 @@ Provide your clinical analysis and mortality risk assessment:"""
         final_survival_prob = integrator_response.get('survival_probability')
         final_confidence = integrator_response.get('confidence')
         
-        # Improved fallback: if integrator fails to output probabilities, re-run Round 2 agents
+        # Improved fallback: if integrator fails to output probabilities, re-run Round 1 agents
         if final_mortality_prob is None and final_survival_prob is None:
-            print("[WARNING] Integrator failed to produce probabilities, re-running Round 2 agents...")
+            print("[WARNING] Integrator failed to produce probabilities, re-running Round 1 agents...")
             if logger:
-                logger.warning("Integrator produced no probabilities - re-running Round 2 agents")
+                logger.warning("Integrator produced no probabilities - re-running Round 1 agents")
             
-            # Re-run Round 2 agents in batch
+            # Re-run Round 1 agents in batch
             retry_responses = self._agent_turn_batch(
                 roles=["mortality_risk_assessor", "protective_factor_analyst"],
                 patient_context=patient_context,
@@ -1849,14 +1787,14 @@ Provide your clinical analysis and mortality risk assessment:"""
                     if logger:
                         logger.warning(f"Double fallback - both probabilities None after retry, predicting opposite of ground_truth={ground_truth}, prediction={final_prediction}")
                 else:
-                    # Ground truth not available, use target analyst as fallback
-                    print("[FALLBACK] Still no probabilities from retry and no ground truth, using target analyst prediction")
-                    final_prediction = target_response.get('prediction')
-                    final_mortality_prob = target_response.get('mortality_probability')
-                    final_survival_prob = target_response.get('survival_probability')
-                    final_confidence = target_response.get('confidence')
+                    # Ground truth not available, use random fallback
+                    print("[FALLBACK] Still no probabilities from retry and no ground truth, using random prediction")
+                    final_prediction = 0  # Default to survival when all else fails
+                    final_mortality_prob = 0.0
+                    final_survival_prob = 1.0
+                    final_confidence = 'low'
                     if logger:
-                        logger.warning("Double fallback - using target analyst prediction")
+                        logger.warning("Double fallback - using random prediction (survival)")
         
         print(f"\n{'='*80}")
         print(f"DEBATE COMPLETED - Final Prediction: {final_prediction}")
@@ -1890,16 +1828,12 @@ Provide your clinical analysis and mortality risk assessment:"""
             'final_survival_probability': final_survival_prob,
             'final_confidence': final_confidence,
             'debate_history': debate_history,
-            'rounds_completed': 3,  # Always 3 rounds in structured flow
+            'rounds_completed': 2,  # Now 2 rounds in structured flow (removed target_patient_analyst)
             'total_generation_time': sum(r.get('generation_time', 0) for r in debate_history),
             'integrator_prediction': integrator_response.get('prediction'),
             'integrator_mortality_probability': integrator_response.get('mortality_probability'),
             'integrator_survival_probability': integrator_response.get('survival_probability'),
-            'integrator_confidence': integrator_response.get('confidence'),
-            'target_prediction': target_response.get('prediction'),
-            'target_mortality_probability': target_response.get('mortality_probability'),
-            'target_survival_probability': target_response.get('survival_probability'),
-            'target_confidence': target_response.get('confidence')
+            'integrator_confidence': integrator_response.get('confidence')
         }
 
 # Test the debate system
