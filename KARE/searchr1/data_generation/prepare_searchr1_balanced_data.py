@@ -71,12 +71,13 @@ When confident in your prediction, provide your final answer as <answer>0</answe
 {target_context}
 
 ## Similar Patient Cases
-For reference, here are similar patient cases with known outcomes:
+For reference, here are similar patient cases with known outcomes.
+Do not assume either set matches the target; compare which set is more clinically similar.
 
-### Similar Patients (Same Outcome Expected)
+### Similar Cases with Mortality=1 (positive class)
 {positive_similars}
 
-### Similar Patients (Different Outcome Expected)
+### Similar Cases with Survival=0 (negative class)
 {negative_similars}
 
 ## Task
@@ -130,12 +131,13 @@ IMPORTANT: The two probabilities MUST sum to exactly 1.00
 {target_context}
 
 ## Similar Patient Cases (For Reference)
-These cases show outcomes from similar patients:
+These cases show outcomes from similar patients.
+Do not assume either set matches the target; compare which set is more clinically similar.
 
-### Similar Patients (Same Outcome Expected)
+### Similar Cases with Mortality=1 (positive class)
 {positive_similars}
 
-### Similar Patients (Different Outcome Expected)
+### Similar Cases with Survival=0 (negative class)
 {negative_similars}
 
 ## Task

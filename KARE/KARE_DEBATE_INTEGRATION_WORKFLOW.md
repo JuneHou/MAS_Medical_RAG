@@ -15,12 +15,19 @@ Temporal Patient Context + Similar Patients (mortality=0/1) + MedRAG Retrieval �
 
 ### Multi-Agent Collaboration Flow:
 ```
-Round 1: Target Patient Analysis (Individual Risk Assessment + RAG Retrieval + Prediction)
-Round 2A: Mortality Risk Assessment (Evidence Analysis + RAG Retrieval)
-Round 2B: Protective Factor Analysis (Evidence Analysis + RAG Retrieval)  
-Round 3: Two-Step Tool-Calling Integration:
-  ├── Step 1: Mortality Assessment (Assess → Identify Gaps → Retrieve → Final Mortality Probability)
-  └── Step 2: Survival Assessment (Assess → Identify Gaps → Retrieve → Final Survival Probability)
+Round 1: Label-Blind Contrastive Analysis (PARALLEL BATCH PROCESSING)
+├── Analyst 1 (Mortality Case): Target vs Similar Patient Comparison + RAG Retrieval
+│   └── Label-Blind: No knowledge that similar patient had mortality=1
+└── Analyst 2 (Survival Case): Target vs Similar Patient Comparison + RAG Retrieval
+    └── Label-Blind: No knowledge that similar patient had survival=0
+
+Round 2: Search-R1 Style Integration with Label Injection:
+├── Prepare History: Add labels ("Mortality=1 Analysis", "Survival=0 Analysis")
+├── Search-R1 Native Flow:
+│   ├── Step 1: Generate until </search> tag (max_tokens=2048)
+│   ├── Step 2: Execute retrieval → format as <information>docs</information>
+│   └── Step 3: Continue generation → MORTALITY/SURVIVAL PROBABILITIES (once)
+└── Final Decision: Based on probability comparison
 ```
 
 ### Context Management and Summarization:
@@ -50,58 +57,72 @@ The system employs **four specialized medical AI agents** with distinct analytic
   - Evidence-based preliminary mortality prediction
 - **Output**: `\\boxed{0}` or `\\boxed{1}` + detailed reasoning
 
-#### 2. **Mortality Risk Assessor** (Round 2A)
-- **Role**: Mortality risk evidence specialist
-- **Focus**: Analysis of similar patients with mortality=1 + Medical evidence
+#### 2. **Mortality Risk Assessor** (Round 1A - Label-Blind Analyst)
+- **Role**: Clinical pattern comparison specialist (LABEL-BLIND)
+- **Focus**: Contrastive analysis of target vs one similar patient
 - **Temperature**: 0.3 (focused, consistent analysis)
-- **Max Tokens**: 8,192
-- **RAG Integration**: Retrieves mortality risk factors and prognostic indicators
-- **Output**: Evidence analysis only (NO prediction, NO \\boxed{})
+- **Max Tokens**: 32,768
+- **Label-Blind Design**: 
+  - Receives preprocessed input showing "Shared" vs "Unique to Target" vs "Unique to Similar"
+  - NO knowledge that similar patient had mortality=1 outcome
+  - Retrieval query uses patient context ONLY (no "mortality risk" hints)
+- **RAG Integration**: Label-blind retrieval (no outcome-based keywords)
+- **Output**: Pattern analysis only (NO outcome speculation, NO prediction, NO \\boxed{})
 - **Specialization**:
-  - Mortality-contributing factor identification with strength ratings
-  - High-risk pattern extraction from fatal cases
-  - Medical literature support for mortality risk factors
-  - Evidence quality assessment (Weak/Moderate/Strong)
+  - Shared clinical feature identification across both patients
+  - Target-specific pattern extraction (unique conditions/procedures/medications)
+  - Similar-specific pattern extraction
+  - Temporal progression analysis
+  - Medical literature support for pattern significance
 
-#### 3. **Protective Factor Analyst** (Round 2B)
-- **Role**: Survival evidence specialist
-- **Focus**: Analysis of similar patients with mortality=0 + Protective factors
+#### 3. **Protective Factor Analyst** (Round 1B - Label-Blind Analyst)
+- **Role**: Clinical pattern comparison specialist (LABEL-BLIND)
+- **Focus**: Contrastive analysis of target vs one similar patient
 - **Temperature**: 0.3 (focused, consistent analysis)
-- **Max Tokens**: 8,192
-- **RAG Integration**: Retrieves protective factors and survival indicators
-- **Output**: Evidence analysis only (NO prediction, NO \\boxed{})
+- **Max Tokens**: 32,768
+- **Label-Blind Design**: 
+  - Receives preprocessed input showing "Shared" vs "Unique to Target" vs "Unique to Similar"
+  - NO knowledge that similar patient had survival=0 outcome
+  - Retrieval query uses patient context ONLY (no "survival factor" hints)
+- **RAG Integration**: Label-blind retrieval (no outcome-based keywords)
+- **Output**: Pattern analysis only (NO outcome speculation, NO prediction, NO \\boxed{})
 - **Specialization**:
-  - Survival-contributing factor identification with strength ratings
-  - Protective pattern extraction from survival cases
-  - Treatment effectiveness and recovery evidence
-  - Evidence quality assessment (Weak/Moderate/Strong)
+  - Shared clinical feature identification across both patients
+  - Target-specific pattern extraction (unique conditions/procedures/medications)
+  - Similar-specific pattern extraction
+  - Temporal progression analysis
+  - Medical literature support for pattern significance
 
-#### 4. **Balanced Clinical Integrator** (Round 3 - Two-Step Tool-Calling)
-- **Role**: Two-step specialized decision maker with strategic evidence retrieval
-- **Focus**: Separate mortality and survival probability assessments
-- **Temperature**: 0.3 (focused decision making)
-- **Max Tokens**: 32,768 total (8k per step)
-- **Tool-Calling Architecture**:
+#### 4. **Balanced Clinical Integrator** (Round 2 - Search-R1 Native Single-Generation)
+- **Role**: Evidence-based decision maker with Search-R1 trained retrieval behavior
+- **Focus**: Unified mortality and survival probability assessment
+- **Temperature**: 0.5 (balanced reasoning)
+- **Max Tokens**: 34,816 total (2048 search + 32,768 reasoning)
+- **Search-R1 Native Architecture**:
   
-  **Step 1: Mortality Assessment Integrator**
-  - Assess available mortality evidence from previous rounds
-  - Identify knowledge gaps for mortality risk assessment
-  - Strategic retrieval: `retrieve("specific mortality risk query based on patient conditions")`
-  - Integrate retrieved evidence with debate history
-  - Output: `MORTALITY PROBABILITY: X.XX`
+  **Three-Step Generation Flow**
+  - Step 1: Generate until `</search>` tag (max_tokens=2048, stop=["</search>"])
+    - Model identifies knowledge gaps
+    - Generates: `<search>specific medical query</search>`
+  - Step 2: Information Injection (system-controlled)
+    - Execute retrieval with model's query
+    - Format as: `<information>retrieved docs</information>`
+    - Inject into context without new generation
+  - Step 3: Continue Generation (max_tokens=32,768)
+    - Model receives `<information>` block
+    - Continues reasoning from where it stopped
+    - Outputs: `MORTALITY PROBABILITY: X.XX` and `SURVIVAL PROBABILITY: X.XX`
   
-  **Step 2: Survival Assessment Integrator**  
-  - Assess available survival evidence from previous rounds
-  - Identify knowledge gaps for protective factors assessment
-  - Strategic retrieval: `retrieve("specific survival/protective factors query based on patient conditions")`
-  - Integrate retrieved evidence with debate history
-  - Output: `SURVIVAL PROBABILITY: X.XX`
+- **Label-Aware Integration**:
+  - Receives debate history WITH labels ("Mortality=1 Analysis", "Survival=0 Analysis")
+  - Note added: "Analyses were conducted without knowledge of outcomes"
   
-- **Final Decision**: Manual determination based on probability comparison
+- **Final Decision**: Based on probability comparison (mortality > survival → predict 1)
+- **Key Fix**: Single-generation prevents duplicate probabilities (was generating twice with old two-phase approach)
 - **Specialization**:
-  - Strategic medical evidence retrieval based on identified knowledge gaps
-  - Separate mortality vs survival probability assessment
-  - Evidence integration (debate + retrieved medical literature)
+  - Trained Search-R1 behavior for knowledge-seeking
+  - Unified mortality and survival assessment in single response
+  - Evidence integration (label-revealed debate + retrieved medical literature)
   - Conservative mortality prediction with base rate consideration
 
 ### System Hyperparameters
@@ -180,17 +201,19 @@ Summarization System:
 ```
 
 #### Prediction Format
-- **Round 1**: Binary prediction `\\boxed{0}` or `\\boxed{1}` + detailed analysis
-- **Round 2A/2B**: Evidence-only output (NO predictions, NO \\boxed{})
-- **Round 3**: Separate probability assessments + manual determination
-  - Step 1: `MORTALITY PROBABILITY: X.XX (0.00 to 1.00)`
-  - Step 2: `SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)`
-  - Final: Manual comparison → higher probability determines prediction
+- **Round 1A/1B**: Pattern analysis only (NO predictions, NO \\boxed{}, NO outcome speculation)
+  - Label-blind analysts focus solely on clinical pattern comparison
+  - Output: Shared features, target-specific features, similar-specific features
+- **Round 2**: Single-generation probability assessment with Search-R1 retrieval
+  - Output: `MORTALITY PROBABILITY: X.XX (0.00 to 1.00)` + `SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)`
+  - Generated ONCE after receiving `<information>retrieved evidence</information>`
+  - Probabilities must sum to 1.00
 - **Extraction Method**: 
-  - Round 1: Regex pattern matching for `\\boxed{0}` or `\\boxed{1}`
-  - Round 3: Probability extraction + manual determination logic
+  - Round 1: No extraction needed (pattern analysis only)
+  - Round 2: Regex pattern matching for probability values from unified response
+  - Key Fix: Single extraction point prevents duplicate probabilities
 - **Fallback Strategy**: Conservative default to survival (0) if extraction fails
-- **Decision Method**: Two-step integrator with probability-based determination
+- **Decision Method**: Probability comparison → `prediction = 1 if mortality_prob > survival_prob else 0`
 
 ## KARE's Temporal Structure Understanding
 
@@ -210,7 +233,49 @@ Summarization System:
 
 ## Core Components
 
-### 1. Context Management and Summarization System ✅ IMPLEMENTED
+### 1. Label-Blind Contrastive Preprocessing ✅ IMPLEMENTED
+
+#### Preprocessing Architecture
+The system implements label-blind contrastive analysis to prevent outcome leakage to analysts:
+
+```python
+from kare_contrastive_preprocessing import preprocess_for_debate
+
+preprocessed = preprocess_for_debate(
+    target_context,      # Target patient EHR
+    positive_similars,   # Similar patient with mortality=1
+    negative_similars    # Similar patient with survival=0
+)
+# Returns:
+# - analyst1_input: Target vs Similar (mortality=1) - NO LABEL
+# - analyst2_input: Target vs Similar (survival=0) - NO LABEL
+# - original_target: Original target context for reference
+```
+
+#### Contrastive View Format
+Each analyst receives structured comparison showing:
+- **Shared with Similar**: Conditions/procedures/medications in BOTH patients
+- **Unique to Target**: Items only in target patient
+- **Unique to Similar**: Items only in similar patient
+
+**Key Design**: Analysts see clinical patterns but NOT outcomes. No mentions of "mortality", "death", "survival" in analyst inputs.
+
+#### Label Injection for Integrator
+Labels added ONLY when preparing history for integrator:
+```python
+from kare_contrastive_preprocessing import format_integrator_history_with_labels
+
+integrator_history = format_integrator_history_with_labels(
+    analyst1_response,  # Pattern analysis from analyst 1
+    analyst2_response   # Pattern analysis from analyst 2
+)
+# Adds headers:
+# "### Similar Case with Mortality=1 (positive class) Analysis:"
+# "### Similar Case with Survival=0 (negative class) Analysis:"
+# Note: "Analyses were conducted without knowledge of outcomes"
+```
+
+### 2. Context Management and Summarization System ✅ IMPLEMENTED
 
 #### Automatic Round-by-Round Summarization
 The system implements intelligent context management to handle long debate histories while preserving critical medical information:
@@ -403,7 +468,7 @@ Integrator Context Preparation:
    """
    ```
 
-3. **Enhanced Four-Round Flow with RAG and Summarization** ✅ IMPLEMENTED
+3. **Enhanced Two-Round Flow with Label-Blind Preprocessing and Search-R1** ✅ IMPLEMENTED
    ```python
    class MortalityDebateSystem:
        def debate_mortality_prediction(self, patient_context, positive_similars, negative_similars, 
@@ -415,33 +480,54 @@ Integrator Context Preparation:
            debate_history = []
            similar_patients_dict = {'positive': positive_similars, 'negative': negative_similars}
            
-           # Round 1: Target Patient Analysis with RAG (with prediction)
-           target_response = self._agent_turn(
-               role="target_patient_analyst",
+           # Preprocessing: Create label-blind contrastive inputs
+           preprocessed = preprocess_for_debate(
+               patient_context,
+               positive_similars,
+               negative_similars
+           )
+           
+           # Round 1: Label-Blind Contrastive Analysis (PARALLEL BATCH)
+           round1_responses = self._agent_turn_batch(
+               roles=["mortality_risk_assessor", "protective_factor_analyst"],
+               patient_context=patient_context,
+               similar_patients=similar_patients_dict,
+               debate_history=[],
+               logger=logger,
+               patient_id=patient_id,
+               log_dir=str(log_dir),
+               preprocessed_inputs=preprocessed  # Label-blind analyst1_input, analyst2_input
+           )
+           debate_history.extend(round1_responses)
+           # Result: Unbiased pattern comparisons from both analysts
+           
+           # Round 2: Search-R1 Native Integration with Label Injection
+           # Labels added in _prepare_integrator_history():
+           # - "Similar Case with Mortality=1 (positive class) Analysis:"
+           # - "Similar Case with Survival=0 (negative class) Analysis:"
+           integrator_response = self._integrator_single_step_prediction(
                patient_context=patient_context,
                similar_patients=similar_patients_dict,
                medical_knowledge=medical_knowledge,
-               debate_history=[],  # No history yet
+               debate_history=debate_history,  # Label-aware history for integrator
                logger=logger,
                patient_id=patient_id,
                log_dir=str(log_dir)
            )
-           debate_history.append(target_response)
-           # Result: Balanced risk/protective analysis + RAG evidence + preliminary prediction
            
-           # Round 2A: Mortality Risk Assessment with RAG (NO prediction)
-           positive_response = self._agent_turn(
-               role="mortality_risk_assessor",
-               patient_context=patient_context,
-               similar_patients=similar_patients_dict,  # Uses 'positive' similar patients
-               medical_knowledge=medical_knowledge,
-               debate_history=debate_history,  # Has target analysis for context
-               logger=logger,
-               patient_id=patient_id,
-               log_dir=str(log_dir)
-           )
-           debate_history.append(positive_response)
-           # Result: Mortality risk factors with strength ratings + RAG evidence
+           # Search-R1 Flow in _execute_integrator_attempt():
+           # Step 1: Generate until </search> (max_tokens=2048)
+           # Step 2: Execute retrieval → inject <information>docs</information>
+           # Step 3: Continue generation → output probabilities (once)
+           
+           return {
+               'prediction': integrator_response['prediction'],
+               'mortality_probability': integrator_response['mortality_probability'],
+               'survival_probability': integrator_response['survival_probability'],
+               'debate_history': debate_history,
+               'model_name': self.model_name
+           }
+   ```
            
            # Round 2B: Protective Factor Analysis with RAG (NO prediction)
            negative_response = self._agent_turn(
@@ -662,11 +748,17 @@ Log Content Format:
 
 ## Key Advantages of This Implementation
 
-### 1. **Enhanced RAG-Enabled Debate Architecture** ✅
-- **Clean Role Separation**: Analysis (R1) → Evidence (R2A/2B) → Strategic Integration (R3)
-- **Tool-Calling Integration**: Strategic medical evidence retrieval based on identified knowledge gaps
-- **Contrastive Evidence**: Explicit mortality vs survival factor analysis with medical literature support
-- **Two-Step Final Assessment**: Separate mortality and survival probability evaluations
+### 1. **Search-R1 Native Architecture with Label-Blind Analysis** ✅
+- **Clean Role Separation**: Label-Blind Contrastive Analysis (R1) → Label-Aware Integration (R2)
+- **Search-R1 Integration**: Single-generation flow with information injection (prevents duplicate probabilities)
+- **Label-Blind Design**: Analysts see clinical patterns WITHOUT outcome knowledge
+  - Removes all hints: "mortality risk", "survival factors", "death", "protective"
+  - Retrieval queries use patient_context only (no outcome-based keywords)
+  - Contrastive format: "Shared", "Unique to Target", "Unique to Similar"
+- **Label-Aware Integration**: Integrator receives labeled history revealing outcomes
+  - "Mortality=1 Analysis" and "Survival=0 Analysis" headers added
+  - Note: "Analyses were conducted without knowledge of outcomes"
+- **Unified Probability Assessment**: Single response with both mortality and survival probabilities
 - **Context Management**: Automatic summarization prevents token overflow while preserving key information
 
 ### 2. **Perfect KARE Infrastructure Integration** ✅
@@ -676,13 +768,21 @@ Log Content Format:
 - **Context Formatting**: Reproduces KARE's "(new)" and "(continued)" temporal annotations
 - **Binary Prediction**: Clean 0/1 mortality prediction format
 
-### 3. **Superior Reasoning Quality with Medical Evidence Integration** ✅
-- **Evidence-First Approach**: Round 2 provides pure evidence without prediction bias + medical literature support
-- **Strategic Knowledge Retrieval**: Round 3 identifies knowledge gaps and retrieves specific medical evidence
-- **Separate Probability Assessments**: Independent mortality and survival evaluations prevent bias
-- **Medical Literature Integration**: RAG system provides evidence-based support for all clinical assessments
-- **Balanced Clinical Assessment**: Target analyst provides both risk and protective factors for comprehensive evaluation
-- **Interpretable Decisions**: Clear evidence trail from patient data → medical literature → clinical reasoning → probabilities
+### 3. **Superior Reasoning Quality with Label-Blind Design** ✅
+- **Unbiased Pattern Analysis**: Analysts perform clinical comparison without outcome knowledge
+  - Prevents confirmation bias (no anchoring on "mortality" or "survival" labels)
+  - Focus on objective clinical similarities and differences
+  - Medical literature retrieval uses neutral patient context
+- **Search-R1 Trained Behavior**: Model's RL-trained knowledge-seeking patterns preserved
+  - Single-generation with information injection (not two-phase)
+  - Natural stop at `</search>` followed by evidence integration
+  - Unified reasoning after seeing `<information>` block
+- **Label Revelation Only for Integration**: Integrator sees outcome context AFTER pattern analysis complete
+  - Receives unbiased clinical comparisons from analysts
+  - Informed by labels to make mortality vs survival assessment
+  - Conservative base rate consideration (mortality is rare)
+- **Medical Literature Integration**: RAG system provides evidence-based support at all stages
+- **Interpretable Decisions**: Clear trail from label-blind patterns → labeled integration → probabilities
 
 ### 4. **Production-Ready Infrastructure with Advanced Context Management** ✅
 - **Patient-Specific Logging**: Structured per-patient debate logs in organized directories (`results/kare_mor_{model}/debate_logs/`)
