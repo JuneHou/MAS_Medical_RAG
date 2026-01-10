@@ -223,7 +223,7 @@ Output:"""
         sampling_params = SamplingParams(
             temperature=0.7,
             top_p=0.9,
-            max_tokens=2048,
+            max_tokens=32768,
             stop=["<|im_end|>", "</s>"],
             repetition_penalty=1.2
         )

@@ -102,6 +102,8 @@ class MortilitySingleAgentRAG:
         self.task_description = """Mortality Prediction Task:
 Objective: Predict the mortality outcome for a patient's subsequent hospital visit based solely on conditions, procedures, and medications. 
 Labels: 1 = mortality, 0 = survival
+IMPORTANT: Mortality is rare - only predict mortality probability > 0.5 if evidence STRONGLY supports it. When uncertain, predict survival probability > 0.5. The Target patient is the source of truth. Do not treat Similar-only items as present in the Target.
+
 
 Key Considerations:
 1. Conditions:
@@ -303,6 +305,7 @@ Note: Focus on combinations of conditions, procedures, and medications that indi
 
 # Task # 
 {self.task_description}
+Be conservative: mortality is rare, so strong evidence is needed for high mortality probability
 ========================================
 
 # Patient Context #
@@ -317,7 +320,7 @@ Note: Focus on combinations of conditions, procedures, and medications that indi
 ========================================
 # Task #
 {self.task_description}
-
+Be conservative: mortality is rare, so strong evidence is needed for high mortality probability
 ========================================
 # Patient EHR Context #
 {patient_context}
@@ -349,7 +352,7 @@ Similar Patients Who Survived:
         sampling_params = SamplingParams(
             temperature=0.7,
             top_p=0.9,
-            max_tokens=2048,
+            max_tokens=32768,
             stop=["<|im_end|>", "</s>"],
             repetition_penalty=1.2
         )

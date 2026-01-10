@@ -779,7 +779,7 @@ CONCISE SUMMARY  6000 tokens max):
             # Step 1: Generate until </search> tag
             tool_response = self.integrator_llm(
                 initial_prompt,
-                max_tokens=2048,  # Just enough for search query
+                max_tokens=8192,  # Just enough for search query
                 temperature=0.5,
                 top_p=0.9,
                 return_format='string',
