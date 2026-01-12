@@ -10,6 +10,8 @@ import json
 import re
 import time
 import logging
+import traceback
+import random
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 
@@ -24,6 +26,10 @@ sys.path.insert(0, mirage_src)
 from run_medrag_vllm import VLLMWrapper, patch_medrag_for_vllm
 from medrag import MedRAG
 from vllm import SamplingParams
+from kare_contrastive_preprocessing import (
+    preprocess_for_debate,
+    format_integrator_history_with_labels
+)
 
 class MortalityDebateSystem:
     """
@@ -136,60 +142,67 @@ class MortalityDebateSystem:
         # System prompts for each agent
         self.agent_prompts = self._initialize_agent_prompts()
         
-    def _initialize_agent_prompts(self) -> Dict[str, str]:
+def _initialize_agent_prompts(self) -> Dict[str, str]:
         """Initialize specialized prompts for each agent role."""
         
         return {
-            "mortality_risk_assessor": """You are a medical AI that analyzes mortality risk factors. Review the target patient and similar patients who died to identify key risk factors.
+            "mortality_risk_assessor": """You are a medical AI that analyzes clinical patterns between patients.
 
-**MORTALITY RISK ANALYSIS:**
+Task:
+Given (1) Target patient and (2) One Similar patient, produce a contrastive comparison that is grounded in the provided codes.
 
-Based on similar patients who died and medical evidence, identify the most significant risk factors:
+**CLINICAL PATTERN ANALYSIS:**
 
-**HIGH-RISK FACTORS:**
-1. [Risk Factor]: [Strong/Moderate/Weak evidence] - [Why this increases death risk]
-2. [Risk Factor]: [Strong/Moderate/Weak evidence] - [Why this increases death risk]
-3. [Risk Factor]: [Strong/Moderate/Weak evidence] - [Why this increases death risk]
+1. **Shared Clinical Features:**
+   - What conditions, procedures, and medications appear in BOTH patients?
+   - What is the clinical significance of these commonalities?
 
-**RISK SUMMARY:**
-Explain (2-3 sentences) how these factors collectively increase mortality risk based on the evidence from similar fatal cases.
+2. **Similar-Specific Features:**
+   - What is unique to the similar patient?
+   - What does this tell us about different clinical paths?
 
-**NOTE:** Do not make final predictions - only analyze risk factors.""",
+**TEMPORAL PROGRESSION:**
+Analyze how shared and unique patterns evolve across visits.
 
-            "protective_factor_analyst": """You are a medical AI that analyzes survival factors. Review the target patient and similar patients who survived to identify key protective factors.
+**IMPORTANT:** Do NOT speculate about outcomes or mortality. Focus solely on clinical pattern analysis.""",
 
-**SURVIVAL FACTOR ANALYSIS:**
+            "protective_factor_analyst": """You are a medical AI that analyzes clinical patterns between patients.
 
-Based on similar patients who survived and medical evidence, identify the most significant protective factors:
+Task:
+Given (1) Target patient and (2) One Similar patient, produce a contrastive comparison that is grounded in the provided codes.
 
-**PROTECTIVE FACTORS:**
-1. [Protective Factor]: [Strong/Moderate/Weak evidence] - [Why this supports survival]
-2. [Protective Factor]: [Strong/Moderate/Weak evidence] - [Why this supports survival]
-3. [Protective Factor]: [Strong/Moderate/Weak evidence] - [Why this supports survival]
+**CLINICAL PATTERN ANALYSIS:**
 
-**SURVIVAL SUMMARY:**
-Explain (2-3 sentences) how these factors collectively support patient survival based on evidence from similar survival cases.
+1. **Shared Clinical Features:**
+   - What conditions, procedures, and medications appear in BOTH patients?
+   - What is the clinical significance of these commonalities?
 
-**NOTE:** Do not make final predictions - only analyze protective factors.""",
+2. **Similar-Specific Features:**
+   - What is unique to the similar patient?
+   - What does this tell us about different clinical paths?
+
+**TEMPORAL PROGRESSION:**
+Analyze how shared and unique patterns evolve across visits.
+
+**IMPORTANT:** Do NOT speculate about outcomes or mortality. Focus solely on clinical pattern analysis.""",
 
             "balanced_clinical_integrator": """You are a medical AI Clinical Assistant analyzing mortality and survival probabilities for the NEXT hospital visit.
 
-IMPORTANT: Mortality is rare - only predict mortality if evidence STRONGLY supports it. When uncertain, predict survival.
+IMPORTANT: Mortality is rare - only predict mortality probability > 0.5 if evidence STRONGLY supports it. When uncertain, predict survival probability > 0.5. The Target patient is the source of truth. Do not treat Similar-only items as present in the Target.
 
 Available tools:
-- retrieve(query): Retrieve medical evidence for your assessment
+- <search>query</search>: Retrieve medical evidence. Retrieved information will appear in <information>...</information> tags.
 
-Instructions:
-1) Based on the patient's specific conditions, call retrieve() with a custom query about their prognosis (e.g., "sepsis mortality prognosis elderly patients" or "heart failure survival outcomes")
-2) Review all available information and the retrieved evidence
-3) Analyze BOTH mortality risk factors AND survival/protective factors
-4) Be conservative: mortality is rare, so strong evidence is needed for high mortality probability
+Workflow:
+1) Compare the Target patient to two similar cases using the two analysis, and write 3-4 key factors contribute to the target patient's next visit.
+2) When you need additional knowledge, call <search>your custom query</search> based on the patient's specific conditions (e.g., <search>sepsis mortality prognosis elderly patients</search>)
+3) After seeing the <information>retrieved evidence</information>, analyze BOTH risky factors AND survival factors. Be conservative: mortality is rare, so strong evidence is needed for high mortality probability
+4) After reviewing all evidence, provide your final assessment with:
 
-Provide comprehensive clinical reasoning and end with:
 MORTALITY PROBABILITY: X.XX (0.00 to 1.00)
 SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)
 
-IMPORTANT: The two probabilities MUST sum to exactly 1.00"""
+Note: The two probabilities MUST sum to exactly 1.00"""
         }
     
     def _create_retrieval_tool(self, k=8):
@@ -393,12 +406,13 @@ CONCISE SUMMARY  6000 tokens max):
     def _prepare_integrator_history(self, debate_history: List[Dict[str, Any]]) -> str:
         """
         Prepare history for integrator by summarizing individual rounds if needed and combining them.
+        ADDS LABELS to identify which analysis is for mortality vs survival cases.
         
         Args:
             debate_history: List of all previous debate responses
             
         Returns:
-            Combined history text with individual rounds summarized if needed
+            Combined history text with individual rounds summarized if needed and labels added
         """
         combined_history = "\n## Previous Analysis:\n"
         
@@ -411,19 +425,25 @@ CONCISE SUMMARY  6000 tokens max):
             # Determine round type for appropriate summarization
             if role == "mortality_risk_assessor":
                 round_name = "risk_assessment"
+                label_header = "### Similar Case with Mortality=1 (positive class) Analysis:\n"
             elif role == "protective_factor_analyst":
                 round_name = "protective_analysis"
+                label_header = "### Similar Case with Survival=0 (negative class) Analysis:\n"
             else:
                 round_name = f"{role}_analysis"
+                label_header = f"### {role.replace('_', ' ').title()}:\n"
             
             # Summarize this round if it's too long (>6000 tokens ≈ 24000 chars)
             processed_message = self._summarize_round_response(message, round_name, target_tokens=4000)
             
-            # Add to combined history
-            combined_history += f"{role}: {processed_message}"
-            if prediction is not None:
+            # Add to combined history with label
+            combined_history += f"\n{label_header}{processed_message}"
+            if prediction is not None and prediction != 'None':
                 combined_history += f" [Prediction: {prediction}]"
-            combined_history += "\n\n"
+            combined_history += "\n"
+        
+        # Add note about label-blind analysis
+        combined_history += "\n**Note:** The above analyses were conducted without knowledge of outcomes. Use these pattern comparisons to inform your assessment.\n"
         
         print(f"[INTEGRATOR] Prepared combined history: {len(combined_history)} chars")
         return combined_history
@@ -474,19 +494,33 @@ CONCISE SUMMARY  6000 tokens max):
             'confidence': None
         }
         
-        # Extract mortality probability - handle various formats
+        # Extract binary prediction first (prioritize over probabilities)
+        binary_patterns = [
+            r'\*\*PREDICTION:?\*\*[\s:]*([01])',
+            r'PREDICTION:[\s]*([01])',
+            r'Prediction:[\s]*([01])',
+            r'Final Prediction:[\s]*([01])',
+            r'\*\*Final Prediction:?\*\*[\s:]*([01])',
+        ]
+        binary_prediction_found = False
+        for pattern in binary_patterns:
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                result['prediction'] = int(match.group(1))
+                binary_prediction_found = True
+                print(f"Debug: Found binary prediction {result['prediction']} with pattern: {pattern}")
+                break
+        
+        # Extract mortality probability - comprehensive patterns matching reparse scripts
         mortality_patterns = [
-            r'MORTALITY PROBABILITY:\s*([0-9]*\.?[0-9]+)',
-            r'Mortality Probability:\s*([0-9]*\.?[0-9]+)',
-            r'Final Mortality Probability:\s*([0-9]*\.?[0-9]+)', 
-            r'mortality\s*probability\s*:?\s*([0-9]*\.?[0-9]+)',
-            r'MORTALITY\s*PROBABILITY\s*[=:]\s*([0-9]*\.?[0-9]+)',
-            r'mortality\s*risk\s*:?\s*([0-9]*\.?[0-9]+)',
-            r'death\s*probability\s*:?\s*([0-9]*\.?[0-9]+)',
-            r'\\boxed\{([0-9]*\.?[0-9]+)\}.*MORTALITY PROBABILITY',  # Handle boxed format
+            r'\*\*MORTALITY PROBABILITY:?\*\*[\s:]*([0-9]*\.?[0-9]+)',
+            r'\*\*Mortality Probability:?\*\*[\s:]*([0-9]*\.?[0-9]+)',
+            r'MORTALITY PROBABILITY:[\s]*([0-9]*\.?[0-9]+)',
+            r'Mortality Probability:[\s]*([0-9]*\.?[0-9]+)',
+            r'mortality probability[:\s]+([0-9]*\.?[0-9]+)',
         ]
         for pattern in mortality_patterns:
-            match = re.search(pattern, response, re.IGNORECASE | re.DOTALL)
+            match = re.search(pattern, response, re.IGNORECASE)
             if match:
                 result['mortality_probability'] = float(match.group(1))
                 print(f"Debug: Found mortality probability {result['mortality_probability']} with pattern: {pattern}")

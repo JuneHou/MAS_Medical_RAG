@@ -305,7 +305,6 @@ Note: Focus on combinations of conditions, procedures, and medications that indi
 
 # Task # 
 {self.task_description}
-Be conservative: mortality is rare, so strong evidence is needed for high mortality probability
 ========================================
 
 # Patient Context #
@@ -320,7 +319,7 @@ Be conservative: mortality is rare, so strong evidence is needed for high mortal
 ========================================
 # Task #
 {self.task_description}
-Be conservative: mortality is rare, so strong evidence is needed for high mortality probability
+
 ========================================
 # Patient EHR Context #
 {patient_context}

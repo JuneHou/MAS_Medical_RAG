@@ -111,11 +111,28 @@ def calculate_metrics(results: List[Dict[str, Any]]) -> Dict[str, float]:
         specificity = 0.0
         print("Warning: No negative ground truth labels (tn + fp = 0), specificity = 0.0")
     
+    # Calculate macro-F1 (average of F1 for both classes)
+    # F1 for class 1 (mortality)
+    precision_1 = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall_1 = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1_mortality = 2 * (precision_1 * recall_1) / (precision_1 + recall_1) if (precision_1 + recall_1) > 0 else 0.0
+    
+    # F1 for class 0 (survival)
+    precision_0 = tn / (tn + fn) if (tn + fn) > 0 else 0.0
+    recall_0 = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    f1_survival = 2 * (precision_0 * recall_0) / (precision_0 + recall_0) if (precision_0 + recall_0) > 0 else 0.0
+    
+    # Macro-F1 is the average
+    macro_f1 = (f1_mortality + f1_survival) / 2
+    
     return {
         'accuracy': accuracy,
         'precision': precision,
         'recall': recall,
         'f1_score': f1,
+        'macro_f1': macro_f1,
+        'f1_mortality': f1_mortality,
+        'f1_survival': f1_survival,
         'specificity': specificity,
         'total_samples': total,
         'valid_predictions': len(predictions),
