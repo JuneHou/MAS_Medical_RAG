@@ -1,0 +1,35 @@
+{
+  "selection_criteria": {
+    "target_positives": 54,
+    "actual_positives": 54,
+    "target_negatives": 46,
+    "actual_negatives": 46,
+    "total_samples": 100
+  },
+  "negative_pools": {
+    "n3_available": 1,
+    "n2_available": 35,
+    "n0_available": 659,
+    "hard_selected": 23,
+    "hard_target": 23,
+    "easy_selected": 23,
+    "easy_target": 23
+  },
+  "selection_rules": {
+    "positive_selection": "All samples with label=1",
+    "negative_selection": [
+      "Balanced strategy: 23 hard (N3+N2) + 23 easy (N0)",
+      "Hard pool: All N3 (wrong in 3 runs) + top N2 (wrong in 2 runs) to reach 23",
+      "Easy pool: 23 from N0 (correct in all 3 runs)"
+    ],
+    "sorting_criteria": [
+      "Hard pool: prompt_len_tokens_target (longer first), sample_id (ascending)",
+      "Easy pool: rag_called_both, prompt_len_tokens_target, sample_id"
+    ]
+  },
+  "split_tags": {
+    "pos_all": "All positive samples (label=1)",
+    "neg_hard": "Hard negatives (N3 + top N2, wrong in 2-3 runs)",
+    "neg_easy": "Easy negatives (N0, correct in all 3 runs)"
+  }
+}

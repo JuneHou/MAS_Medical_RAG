@@ -208,7 +208,7 @@ Available tools:
 
 Workflow:
 1) Compare the Target patient to two similar cases using the two analysis, and write 3-4 key factors contribute to the target patient's next visit.
-2) When you need additional knowledge, call <search>your custom query</search> based on the patient's specific conditions (e.g., <search>sepsis mortality prognosis elderly patients</search>)
+2) When you need additional knowledge, call <search>your custom query</search> based on the patient's specific conditions.
 3) After seeing the <information>retrieved evidence</information>, analyze BOTH risky factors AND survival factors. Be conservative: mortality is rare, so strong evidence is needed for high mortality probability
 4) After reviewing all evidence, provide your final assessment with:
 
