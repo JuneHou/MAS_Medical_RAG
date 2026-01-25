@@ -96,6 +96,7 @@ def test_condition_a(
     
     print("\n" + "="*80)
     print("TESTING CONDITION A: GPT+GPT+GPT (Ceiling)")
+    print("NOTE: Analysts now have retrieval injected (matches Qwen system)")
     print("="*80)
     
     # Also create cache directory for Conditions B & C to use
@@ -128,15 +129,20 @@ def test_condition_a(
             if 'gpt_integrator_final' in result and result['gpt_integrator_final']:
                 total_output_tokens += estimate_tokens(result['gpt_integrator_final'])
             
-            # Input tokens (rough estimate: context + prompts)
-            # 2 analyst calls (~2K tokens each) + 2 integrator calls (~3K tokens each)
-            total_input_tokens += 2 * 2000 + 2 * 3000
+            # Input tokens (rough estimate: context + prompts + retrieval)
+            # NOW MATCHES Qwen: 2 analyst calls WITH RETRIEVAL (~2.8K tokens each) + 2 integrator calls (~3K tokens each)
+            # Analyst input: 2K (context) + 800 (retrieval context ~8 docs * 400 chars)
+            total_input_tokens += 2 * 2800 + 2 * 3000
             
             results.append(result)
             
             print(f"  ✓ Prediction: {result.get('prediction', 'N/A')}")
             print(f"  ✓ Mortality Prob: {result.get('mortality_probability', 'N/A')}")
-            print(f"  ✓ Retrieval used: {result.get('called_retriever', False)}")
+            analyst1_docs = result.get('gpt_analyst1_docs', []) or []
+            analyst2_docs = result.get('gpt_analyst2_docs', []) or []
+            print(f"  ✓ Analyst1 retrieval: {len(analyst1_docs)} docs")
+            print(f"  ✓ Analyst2 retrieval: {len(analyst2_docs)} docs")
+            print(f"  ✓ Integrator retrieval: {result.get('called_retriever', False)}")
             
         except Exception as e:
             print(f"  ✗ Error: {e}")
@@ -148,6 +154,8 @@ def test_condition_a(
     # Create compact summary (don't duplicate verbose outputs from log files)
     compact_results = []
     for r in results:
+        analyst1_docs = r.get('gpt_analyst1_docs', []) or []
+        analyst2_docs = r.get('gpt_analyst2_docs', []) or []
         compact_results.append({
             'sample_id': r.get('sample_id'),
             'label': r.get('label'),
@@ -155,6 +163,8 @@ def test_condition_a(
             'mortality_probability': r.get('mortality_probability'),
             'survival_probability': r.get('survival_probability'),
             'called_retriever': r.get('called_retriever', False),
+            'analyst1_retrieval': len(analyst1_docs) > 0,
+            'analyst2_retrieval': len(analyst2_docs) > 0,
             'error': r.get('error')
         })
     

@@ -13,7 +13,7 @@ This tests: Is Qwen's integrator reasoning limiting performance?
 If Condition D << Condition A → Qwen integrator reasoning is problematic
 If Condition D ≈ Condition A → Integrator quality is not the limiting factor
 
-Note: Uses same vLLM setup as mortality_debate_rag.py
+Note: Uses same vLLM setup as mortality_single_agent_cot.py
 """
 
 import os
@@ -35,44 +35,65 @@ medrag_root = "/data/wang/junh/githubs/mirage_medrag/MedRAG"
 sys.path.insert(0, medrag_root)
 sys.path.insert(0, os.path.join(medrag_root, "src"))
 
-from run_medrag_vllm import VLLMWrapper
+from vllm import LLM, SamplingParams
 from kare_data_adapter import KAREDataAdapter
 from gpt_utils import (
     AGENT_PROMPTS, extract_probabilities
 )
 
 
-# Global vLLM wrapper for Qwen integrator
+class QwenIntegrator:
+    """Qwen integrator wrapper - EXACT pattern from mortality_single_agent_cot.py"""
+    
+    def __init__(self, model_name: str, gpu_id: str):
+        """Initialize Qwen integrator - EXACT copy from mortality_single_agent_cot.py"""
+        self.model_name = model_name
+        self.gpu_id = gpu_id
+        
+        print(f"Qwen integrator ({model_name}) will use GPU: {self.gpu_id}")
+        
+        # Only set CUDA_VISIBLE_DEVICES if not already set externally
+        if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+            os.environ['CUDA_VISIBLE_DEVICES'] = self.gpu_id
+            print(f"Set CUDA_VISIBLE_DEVICES={self.gpu_id}")
+        else:
+            print(f"CUDA_VISIBLE_DEVICES already set to: {os.environ['CUDA_VISIBLE_DEVICES']}")
+        
+        # Initialize VLLM directly - EXACT as mortality_single_agent_cot.py
+        self.llm = LLM(
+            model=model_name,
+            tensor_parallel_size=1,
+            trust_remote_code=True,
+            gpu_memory_utilization=0.85,
+            enforce_eager=True
+        )
+        print(f"VLLM initialized for {model_name}")
+    
+    def __call__(self, prompt: str, max_tokens: int = 32768, temperature: float = 0.7) -> str:
+        """Generate response - EXACT pattern from mortality_single_agent_cot.py"""
+        # Format prompt for Qwen
+        if "qwen" in self.model_name.lower():
+            formatted_prompt = f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+        else:
+            formatted_prompt = prompt
+        
+        # Generate response
+        sampling_params = SamplingParams(
+            temperature=temperature,
+            top_p=0.9,
+            max_tokens=max_tokens,
+            stop=["<|im_end|>", "</s>"],
+            repetition_penalty=1.2
+        )
+        
+        outputs = self.llm.generate([formatted_prompt], sampling_params)
+        response_text = outputs[0].outputs[0].text
+        
+        return response_text
+
+
+# Global integrator instance
 _qwen_integrator = None
-
-
-def initialize_qwen_integrator(model_name: str, gpu_id: str = "0"):
-    """Initialize the Qwen integrator using vLLM (same as mortality_debate_rag.py)."""
-    global _qwen_integrator
-    
-    if _qwen_integrator is not None:
-        print("  Qwen integrator already initialized")
-        return _qwen_integrator
-    
-    print(f"Initializing Qwen integrator: {model_name} on GPU {gpu_id}...")
-    
-    # Set GPU
-    original_cuda = os.environ.get('CUDA_VISIBLE_DEVICES', None)
-    os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
-    print(f"  CUDA_VISIBLE_DEVICES={gpu_id}")
-    
-    # Initialize vLLM wrapper (same as mortality_debate_rag.py)
-    _qwen_integrator = VLLMWrapper(
-        model_name=model_name,
-        enable_thinking=True  # Enable thinking mode like integrator
-    )
-    
-    # Restore original CUDA setting if it existed
-    if original_cuda is not None:
-        os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda
-    
-    print("  Qwen integrator initialized")
-    return _qwen_integrator
 
 
 def run_qwen_integrator(
@@ -80,12 +101,11 @@ def run_qwen_integrator(
     analyst1_output: str,
     analyst2_output: str,
     retrieved_docs: str,
-    max_tokens: int = 2048,
+    max_tokens: int = 32768,
     temperature: float = 0.7
 ) -> str:
     """
     Run Qwen integrator with GPT analyst outputs and GPT-retrieved evidence.
-    Uses same vLLM pattern as mortality_debate_rag.py integrator.
     
     Args:
         target_context: Target patient context
@@ -98,11 +118,13 @@ def run_qwen_integrator(
     Returns:
         Qwen integrator response with probabilities
     """
-    if _qwen_integrator is None:
-        raise RuntimeError("Qwen integrator not initialized. Call initialize_qwen_integrator() first.")
+    global _qwen_integrator
     
-    # Get system prompt - EXACT SAME as GPT
-    system_prompt = AGENT_PROMPTS["balanced_clinical_integrator"]
+    if _qwen_integrator is None:
+        raise RuntimeError("Qwen integrator not initialized")
+    
+    # Get system prompt WITHOUT search capability (same as GPT Conditions B/C)
+    system_prompt = AGENT_PROMPTS["balanced_clinical_integrator_no_search"]
     
     # Format previous analysis - EXACT SAME format as GPT
     history_text = f"""
@@ -117,8 +139,9 @@ def run_qwen_integrator(
 **Note:** The above analyses were conducted without knowledge of outcomes. Use these pattern comparisons to inform your assessment.
 """
     
-    # Build prompt - EXACT SAME structure as GPT
-    prompt = f"""{system_prompt}
+    # Build prompt - handle both with and without retrieval
+    if retrieved_docs:
+        prompt = f"""{system_prompt}
 
 ## Target Patient:
 {target_context}
@@ -135,18 +158,23 @@ MORTALITY PROBABILITY: X.XX (0.00 to 1.00)
 SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)
 
 Note: The two probabilities MUST sum to exactly 1.00"""
+    else:
+        prompt = f"""{system_prompt}
+
+## Target Patient:
+{target_context}
+
+{history_text}
+
+Provide your final assessment with:
+
+MORTALITY PROBABILITY: X.XX (0.00 to 1.00)
+SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)
+
+Note: The two probabilities MUST sum to exactly 1.00"""
     
-    # Call Qwen using vLLM (same pattern as mortality_debate_rag.py integrator)
-    response = _qwen_integrator(
-        prompt,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        top_p=0.9,
-        return_format='string',
-        stop_sequences=["<|im_end|>", "</s>"],
-        repetition_penalty=1.15,
-        enable_thinking=True
-    )
+    # Call Qwen
+    response = _qwen_integrator(prompt, max_tokens=max_tokens, temperature=temperature)
     
     # Extract string response
     if isinstance(response, list):
@@ -210,26 +238,37 @@ def process_sample_condition_d(
         result['gpt_analyst2'] = analyst2_output
         
         # Check if retrieval was used in Condition A
-        if not condition_a_result.get('called_retriever'):
-            raise ValueError(f"Condition A did not use retrieval for {sample_id}. Condition D requires retrieval.")
+        called_retriever = condition_a_result.get('called_retriever', False)
         
-        # Load GPT retrieval results
-        gpt_docs = condition_a_result.get('gpt_docs', [])
-        if not gpt_docs:
-            raise ValueError(f"No GPT documents found in Condition A for {sample_id}")
+        if called_retriever:
+            # Load GPT retrieval results
+            gpt_docs = condition_a_result.get('gpt_docs', [])
+            if not gpt_docs:
+                raise ValueError(f"No GPT documents found in Condition A for {sample_id}")
+            
+            # Format documents - EXACT SAME format as GPT conditions
+            from gpt_utils import format_retrieved_docs
+            docs_formatted = format_retrieved_docs(gpt_docs)
+            
+            result['gpt_query'] = condition_a_result.get('gpt_query')
+            result['gpt_docs'] = gpt_docs
+            result['called_retriever'] = True
+            
+            print(f"  Loaded GPT analysts + {len(gpt_docs)} retrieved documents")
+        else:
+            # No retrieval needed - analysts were confident
+            docs_formatted = ""
+            result['gpt_query'] = None
+            result['gpt_docs'] = []
+            result['called_retriever'] = False
+            
+            print(f"  Loaded GPT analysts (no retrieval needed)")
         
-        # Format documents - EXACT SAME format as GPT conditions
-        from gpt_utils import format_retrieved_docs
-        docs_formatted = format_retrieved_docs(gpt_docs)
-        
-        result['gpt_query'] = condition_a_result.get('gpt_query')
-        result['gpt_docs'] = gpt_docs
-        result['called_retriever'] = True
-        
-        print(f"  Loaded GPT analysts + {len(gpt_docs)} retrieved documents")
-        
-        # Step 2: Run Qwen Integrator with GPT inputs
-        print("  Running Qwen Integrator with GPT evidence...")
+        # Step 2: Run Qwen Integrator with GPT inputs (with or without retrieval)
+        if called_retriever:
+            print("  Running Qwen Integrator with GPT evidence...")
+        else:
+            print("  Running Qwen Integrator without retrieval...")
         qwen_response = run_qwen_integrator(
             target_context, analyst1_output, analyst2_output, docs_formatted
         )
@@ -246,6 +285,12 @@ def process_sample_condition_d(
     except Exception as e:
         print(f"  Error: {e}")
         result['error'] = str(e)
+    
+    # Fallback: if prediction is None (parse failure or exception), use opposite of label
+    if result['prediction'] is None:
+        result['prediction'] = 1 - int(sample['label'])
+        result['mortality_probability'] = 1.0 if result['prediction'] == 1 else 0.0
+        result['survival_probability'] = 1.0 - result['mortality_probability']
     
     return result
 
@@ -293,11 +338,14 @@ def main():
         print("Please run run_condition_A.py first!")
         return
     
-    # Initialize Qwen integrator
+    # Initialize Qwen integrator - EXACT pattern from mortality_single_agent_cot.py
+    global _qwen_integrator
     print(f"\nInitializing Qwen integrator...")
-    initialize_qwen_integrator(args.qwen_model, args.gpu_id)
+    _qwen_integrator = QwenIntegrator(model_name=args.qwen_model, gpu_id=args.gpu_id)
+    print("Qwen integrator initialized successfully")
     
     # Create output directory with logs subdirectory
+    args.output_dir = args.output_dir
     output_dir = Path(args.output_dir)
     logs_dir = output_dir / "logs"
     output_dir.mkdir(parents=True, exist_ok=True)

@@ -18,7 +18,7 @@ sys.path.insert(0, os.getcwd())
 
 from kare_data_adapter import KAREDataAdapter
 #from mortality_debate_rag import MortalityDebateSystem as MortalityDebateRAG
-from mortality_debate_rag_binary import MortalityDebateSystem as MortalityDebateRAG
+from mortality_debate_rag import MortalityDebateSystem as MortalityDebateRAG
 from mortality_debate_cot import MortalityDebateSystem as MortalityDebateCOT
 
 def calculate_metrics(results: List[Dict[str, Any]]) -> Dict[str, float]:
@@ -534,7 +534,7 @@ def main():
                 dir_name = f"{args.mode}_mor_{clean_model_name}_int_{clean_integrator_name}{fireworks_suffix}"
         
         # Create results directory structure
-        results_dir = script_dir / "results_binary" / dir_name
+        results_dir = script_dir / "results_unbiased" / dir_name
         results_dir.mkdir(parents=True, exist_ok=True)
         
         # Set output file path

@@ -6,14 +6,15 @@ This is the "ceiling" condition where all components use GPT-4.
 Tests the upper bound of performance with stronger reasoning.
 
 Flow:
-1. Run GPT Analyst 1 (mortality_risk_assessor) on target vs positive similar
-2. Run GPT Analyst 2 (protective_factor_analyst) on target vs negative similar  
+1. Run GPT Analyst 1 (mortality_risk_assessor) on target vs positive similar WITH RETRIEVAL
+2. Run GPT Analyst 2 (protective_factor_analyst) on target vs negative similar WITH RETRIEVAL
 3. Run GPT Integrator with both analyst outputs
 4. GPT Integrator generates <search> query
 5. Retrieve documents using MedRAG with GPT query
 6. GPT Integrator produces final prediction with retrieved evidence
 
-All prompts are EXACTLY THE SAME as Qwen system for fair comparison.
+NOW MATCHES Qwen system: analysts have retrieval injected into their prompts.
+All prompts follow the SAME PATTERN as Qwen system for fair comparison.
 """
 
 import os
@@ -41,24 +42,56 @@ def run_gpt_analyst(
     gpt_client: GPTClient,
     role: str,
     target_context: str,
-    similar_context: str
-) -> str:
+    similar_context: str,
+    medrag = None,
+    k: int = 8,
+    patient_id: str = "unknown"
+) -> Dict[str, Any]:
     """
-    Run GPT analyst on target vs similar patient.
+    Run GPT analyst on target vs similar patient WITH RETRIEVAL.
+    NOW MATCHES Qwen system - retrieval is injected into analyst prompts.
     
     Args:
         gpt_client: GPT client
         role: Agent role (mortality_risk_assessor or protective_factor_analyst)
         target_context: Target patient context
         similar_context: Similar patient context
+        medrag: MedRAG instance for retrieval
+        k: Number of documents to retrieve
+        patient_id: Patient ID for logging
         
     Returns:
-        Analyst response
+        Dictionary with analyst response and retrieved docs
     """
     # Get system prompt - EXACT SAME as Qwen
     system_prompt = AGENT_PROMPTS[role]
     
-    # Build prompt - EXACT SAME format as Qwen
+    # Perform retrieval if MedRAG is available (MATCHES mortality_debate_rag.py)
+    retrieved_docs = []
+    retrieval_context = ""
+    if medrag:
+        try:
+            print(f"  Retrieving medical evidence for {role}...")
+            # Use target_context for retrieval query (matches Qwen pattern)
+            retrieval_query = target_context
+            retrieved_docs = retrieve_documents(medrag, retrieval_query, k=k)
+            
+            if retrieved_docs:
+                # Format retrieval context - MATCHES mortality_debate_rag.py format
+                retrieval_context = "\n## Retrieved Medical Evidence:\n"
+                for idx, doc in enumerate(retrieved_docs[:8]):
+                    content = doc.get('content', '')
+                    # Truncate to 400 chars like in mortality_debate_rag.py
+                    retrieval_context += f"\n[Evidence {idx+1}]: {content[:400]}...\n"
+                print(f"  Retrieved {len(retrieved_docs)} documents")
+            else:
+                print(f"  No documents retrieved")
+        except Exception as e:
+            print(f"  Error during retrieval: {e}")
+            retrieved_docs = []
+            retrieval_context = ""
+    
+    # Build prompt - NOW WITH RETRIEVAL CONTEXT (matches Qwen)
     prompt = f"""{system_prompt}
 
 ## Target Patient:
@@ -66,13 +99,16 @@ def run_gpt_analyst(
 
 ## Similar Patient:
 {similar_context}
-
+{retrieval_context}
 Provide your clinical analysis and mortality risk assessment:"""
     
     # Generate response
-    response = gpt_client.generate(prompt, max_tokens=2048, temperature=0.7)
+    response = gpt_client.generate(prompt, max_tokens=32768, temperature=0.7)
     
-    return response
+    return {
+        'response': response,
+        'retrieved_docs': retrieved_docs
+    }
 
 
 def run_gpt_integrator_initial(
@@ -100,10 +136,10 @@ def run_gpt_integrator_initial(
     history_text = f"""
 ## Previous Analysis:
 
-### Analysis 1 (Comparison with mortality case):
+### Similar Case with Mortality=1 (positive class) Analysis:
 {analyst1_output}
 
-### Analysis 2 (Comparison with survival case):
+### Similar Case with Survival=0 (negative class) Analysis:
 {analyst2_output}
 
 **Note:** The above analyses were conducted without knowledge of outcomes. Use these pattern comparisons to inform your assessment.
@@ -120,7 +156,7 @@ def run_gpt_integrator_initial(
 Provide your clinical analysis and mortality risk assessment:"""
     
     # Generate response
-    response = gpt_client.generate(prompt, max_tokens=2048, temperature=0.7)
+    response = gpt_client.generate(prompt, max_tokens=32768, temperature=0.7)
     
     return response
 
@@ -154,10 +190,10 @@ def run_gpt_integrator_final(
     history_text = f"""
 ## Previous Analysis:
 
-### Analysis 1 (Comparison with mortality case):
+### Similar Case with Mortality=1 (positive class) Analysis:
 {analyst1_output}
 
-### Analysis 2 (Comparison with survival case):
+### Similar Case with Survival=0 (negative class) Analysis:
 {analyst2_output}
 
 **Note:** The above analyses were conducted without knowledge of outcomes. Use these pattern comparisons to inform your assessment.
@@ -190,7 +226,7 @@ SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)
 Note: The two probabilities MUST sum to exactly 1.00"""
     
     # Generate response
-    response = gpt_client.generate(prompt, max_tokens=2048, temperature=0.7)
+    response = gpt_client.generate(prompt, max_tokens=32768, temperature=0.7)
     
     return response
 
@@ -224,10 +260,12 @@ def process_sample_condition_a(
         'sample_id': sample_id,
         'label': int(sample['label']),
         'gpt_analyst1': None,
+        'gpt_analyst1_docs': None,  # Track analyst 1 retrieval
         'gpt_analyst2': None,
+        'gpt_analyst2_docs': None,  # Track analyst 2 retrieval
         'gpt_integrator_initial': None,
         'gpt_query': None,
-        'gpt_docs': None,
+        'gpt_docs': None,  # Integrator retrieval
         'called_retriever': False,
         'gpt_integrator_final': None,
         'mortality_probability': None,
@@ -237,19 +275,25 @@ def process_sample_condition_a(
     }
     
     try:
-        # Step 1: Run Analyst 1 (mortality_risk_assessor) - Target vs Positive
-        print("  Running Analyst 1 (mortality_risk_assessor)...")
-        analyst1_output = run_gpt_analyst(
-            gpt_client, "mortality_risk_assessor", target_context, positive_similar
+        # Step 1: Run Analyst 1 (mortality_risk_assessor) - Target vs Positive WITH RETRIEVAL
+        print("  Running Analyst 1 (mortality_risk_assessor) with retrieval...")
+        analyst1_result = run_gpt_analyst(
+            gpt_client, "mortality_risk_assessor", target_context, positive_similar,
+            medrag=medrag, k=k, patient_id=sample_id
         )
+        analyst1_output = analyst1_result['response']
         result['gpt_analyst1'] = analyst1_output
+        result['gpt_analyst1_docs'] = analyst1_result['retrieved_docs']
         
-        # Step 2: Run Analyst 2 (protective_factor_analyst) - Target vs Negative
-        print("  Running Analyst 2 (protective_factor_analyst)...")
-        analyst2_output = run_gpt_analyst(
-            gpt_client, "protective_factor_analyst", target_context, negative_similar
+        # Step 2: Run Analyst 2 (protective_factor_analyst) - Target vs Negative WITH RETRIEVAL
+        print("  Running Analyst 2 (protective_factor_analyst) with retrieval...")
+        analyst2_result = run_gpt_analyst(
+            gpt_client, "protective_factor_analyst", target_context, negative_similar,
+            medrag=medrag, k=k, patient_id=sample_id
         )
+        analyst2_output = analyst2_result['response']
         result['gpt_analyst2'] = analyst2_output
+        result['gpt_analyst2_docs'] = analyst2_result['retrieved_docs']
         
         # Step 3: Run Integrator initial turn
         print("  Running Integrator (initial)...")
@@ -299,6 +343,12 @@ def process_sample_condition_a(
     except Exception as e:
         print(f"  Error: {e}")
         result['error'] = str(e)
+    
+    # Fallback: if prediction is None (parse failure or exception), use opposite of label
+    if result['prediction'] is None:
+        result['prediction'] = 1 - int(sample['label'])
+        result['mortality_probability'] = 1.0 if result['prediction'] == 1 else 0.0
+        result['survival_probability'] = 1.0 - result['mortality_probability']
     
     return result
 

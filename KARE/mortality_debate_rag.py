@@ -201,16 +201,15 @@ Analyze how shared and unique patterns evolve across visits.
 
             "balanced_clinical_integrator": """You are a medical AI Clinical Assistant analyzing mortality and survival probabilities for the NEXT hospital visit.
 
-IMPORTANT: Mortality is rare - only predict mortality probability > 0.5 if evidence STRONGLY supports it. When uncertain, predict survival probability > 0.5. The Target patient is the source of truth. Do not treat Similar-only items as present in the Target.
+IMPORTANT: Mortality is rare. Only assign a high mortality probability when the patient appears at extremely high risk of death with strong evidence. The Target patient is the source of truth. Do not treat Similar-only items as present in the Target.
 
 Available tools:
 - <search>query</search>: Retrieve medical evidence. Retrieved information will appear in <information>...</information> tags.
 
 Workflow:
 1) Compare the Target patient to two similar cases using the two analysis, and write 3-4 key factors contribute to the target patient's next visit.
-2) When you need additional knowledge, call <search>your custom query</search> based on the patient's specific conditions.
-3) After seeing the <information>retrieved evidence</information>, analyze BOTH risky factors AND survival factors. Be conservative: mortality is rare, so strong evidence is needed for high mortality probability
-4) After reviewing all evidence, provide your final assessment with:
+2) When you need additional knowledge, call <search>your custom query</search> based on the patient's specific conditions (e.g., <search>sepsis mortality prognosis elderly patients</search>)
+3) After seeing the <information>retrieved evidence</information>, analyze BOTH risky factors AND survival factors.
 
 MORTALITY PROBABILITY: X.XX (0.00 to 1.00)
 SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)

@@ -32,9 +32,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from kare_data_adapter import KAREDataAdapter
 from gpt_utils import (
     GPTClient, AGENT_PROMPTS, load_qwen_debate_history,
-    extract_probabilities
+    extract_probabilities, run_gpt_integrator_no_search
 )
-from run_condition_A import run_gpt_integrator_initial, run_gpt_integrator_final
 
 
 def load_qwen_analyst_outputs(
@@ -90,7 +89,6 @@ def process_sample_condition_c(
         'label': int(sample['label']),
         'qwen_analyst1': None,
         'qwen_analyst2': None,
-        'gpt_integrator_initial': None,
         'gpt_query': None,  # Reused from Condition A
         'gpt_docs': None,   # Reused from Condition A
         'called_retriever': False,
@@ -117,14 +115,7 @@ def process_sample_condition_c(
         
         print("  Loaded Qwen analyst outputs")
         
-        # Step 2: Run Integrator initial turn with Qwen analyst outputs
-        print("  Running Integrator (initial with Qwen analysts)...")
-        integrator_initial = run_gpt_integrator_initial(
-            gpt_client, target_context, analyst1_output, analyst2_output
-        )
-        result['gpt_integrator_initial'] = integrator_initial
-        
-        # Step 3: Load GPT retrieval bundle from Condition A
+        # Step 2: Load GPT retrieval bundle from Condition A
         print("  Loading GPT retrieval bundle from Condition A...")
         condition_a_file = condition_a_dir / "logs" / f"{sample_id}.json"
         if not condition_a_file.exists():
@@ -148,25 +139,31 @@ def process_sample_condition_c(
                 
                 print(f"  GPT retrieval found: {len(gpt_docs)} documents")
                 
-                # Step 4: Run Integrator final turn with GPT-retrieved evidence
-                print("  Running Integrator (final with GPT evidence)...")
-                integrator_final = run_gpt_integrator_final(
+                # Step 3: Run Integrator with GPT-retrieved evidence (no search capability)
+                print("  Running Integrator with GPT evidence...")
+                integrator_final = run_gpt_integrator_no_search(
                     gpt_client, target_context, analyst1_output, analyst2_output,
-                    integrator_initial, docs_formatted
+                    docs_formatted
                 )
                 result['gpt_integrator_final'] = integrator_final
             else:
-                # No docs - use initial response
-                print("  No GPT documents available")
-                integrator_final = integrator_initial
+                # No docs - run without retrieval (no search capability)
+                print("  No GPT documents available, running without retrieval")
+                integrator_final = run_gpt_integrator_no_search(
+                    gpt_client, target_context, analyst1_output, analyst2_output,
+                    retrieved_docs=None
+                )
                 result['gpt_integrator_final'] = integrator_final
         else:
-            # No GPT retrieval - use initial response as final
-            print("  No GPT retrieval in Condition A")
-            integrator_final = integrator_initial
+            # No GPT retrieval - run without retrieval (no search capability)
+            print("  No GPT retrieval in Condition A, running without retrieval")
+            integrator_final = run_gpt_integrator_no_search(
+                gpt_client, target_context, analyst1_output, analyst2_output,
+                retrieved_docs=None
+            )
             result['gpt_integrator_final'] = integrator_final
         
-        # Step 5: Extract probabilities and prediction
+        # Step 4: Extract probabilities and prediction
         probs = extract_probabilities(integrator_final)
         result['mortality_probability'] = probs['mortality_probability']
         result['survival_probability'] = probs['survival_probability']
@@ -177,6 +174,12 @@ def process_sample_condition_c(
     except Exception as e:
         print(f"  Error: {e}")
         result['error'] = str(e)
+    
+    # Fallback: if prediction is None (parse failure or exception), use opposite of label
+    if result['prediction'] is None:
+        result['prediction'] = 1 - int(sample['label'])
+        result['mortality_probability'] = 1.0 if result['prediction'] == 1 else 0.0
+        result['survival_probability'] = 1.0 - result['mortality_probability']
     
     return result
 

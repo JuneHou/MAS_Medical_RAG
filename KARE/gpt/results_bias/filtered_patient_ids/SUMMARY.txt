@@ -1,0 +1,27 @@
+================================================================================
+PATIENT ID FILTERING SUMMARY
+================================================================================
+
+R1 - Retrieval swap breaks correct GPT pipeline: 2 cases
+    Definition: A correct, but B wrong
+    Files: R1_retrieval_swap_breaks_pipeline.txt, R1_patient_ids_only.txt
+
+R2 - Qwen baseline positive, but B collapses to survival: 5 cases
+    Definition: y=1, Qwen_baseline=1 (single-agent RAG), but GPT_B=0
+    Files: R2_qwen_positive_gpt_collapse.txt, R2_patient_ids_only.txt
+
+R3 - Suspicious retrieval bundles: 86 cases
+    Definition: Low query quality OR high doc redundancy OR low doc relevance
+    Thresholds: query_quality<0.5, redundancy>0.3, avg_relevance<50 or >3 neg docs
+    Files: R3_suspicious_retrieval.txt, R3_patient_ids_only.txt
+
+
+R1 Breakdown:
+  - False alarms (y=0, A=0 correct, B=1 wrong): 0
+  - Missed positives (y=1, A=1 correct, B=0 wrong): 2
+
+Overlap Analysis:
+  R1 ∩ R2: 0 cases
+  R1 ∩ R3: 2 cases - 74955_2, 88432_0
+  R2 ∩ R3: 5 cases - 188_0, 25578_0, 29765_0, 4406_0, 9787_0
+  R1 ∩ R2 ∩ R3: 0 cases
