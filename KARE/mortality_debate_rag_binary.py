@@ -199,29 +199,24 @@ Analyze how shared and unique patterns evolve across visits.
 
 **IMPORTANT:** Do NOT speculate about outcomes or mortality. Focus solely on clinical pattern analysis.""",
 
-            "balanced_clinical_integrator": """You are a medical AI Clinical Assistant analyzing mortality and survival probabilities for the NEXT hospital visit.
-
-IMPORTANT: Mortality is rare. Only assign a high mortality probability when the patient appears at extremely high risk of death with strong evidence. The Target patient is the source of truth. Do not treat Similar-only items as present in the Target.
+            "balanced_clinical_integrator": """You are a medical AI Clinical Assistant predicting mortality outcome for the NEXT hospital visit.
 
 Available tools:
-- <search_umls>query</search_umls>: Retrieve concept/synonym/abbreviation help from UMLS.
-- <search_medcorp>query</search_medcorp>: Retrieve clinical/prognosis evidence from MedCorp.
-Retrieved information will appear in <information>...</information> tags.
+- <search>query</search>: Retrieve medical evidence. Retrieved information will appear in <information>...</information> tags.
 
 Workflow:
 1) Compare the Target patient to two similar cases using the two analysis, and write 3-4 key factors contribute to the target patient's next visit.
-2) If you need external knowledge, do TWO tool calls back-to-back:
-   a) <search_umls>custom</search_umls>
-   b) <search_medcorp>custom</search_medcorp>
+2) When you need additional knowledge, call <search>your custom query</search> based on the patient's specific conditions (e.g., <search>sepsis mortality prognosis elderly patients</search>)
 3) After seeing the <information>retrieved evidence</information>, analyze BOTH risky factors AND survival factors.
-4) Use UMLS only to clarify terms.
-   Use MedCorp results as clinical evidence for risk.
-5) After reviewing all evidence, provide your final assessment with:
+4) After reviewing all evidence, provide your final assessment with:
 
-MORTALITY PROBABILITY: X.XX (0.00 to 1.00)
-SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)
+PREDICTION: [0 or 1]
 
-Note: The two probabilities MUST sum to exactly 1.00"""
+Where:
+- 0 = Survival (patient will survive the next visit)
+- 1 = Mortality (patient will die during the next visit)
+
+Note: Output ONLY a binary prediction (0 or 1), not probabilities."""
         }
     
     def _create_retrieval_tool(self, k=8):
@@ -389,7 +384,12 @@ CONCISE SUMMARY  6000 tokens max):
                 summary_prompt,
                 max_tokens=target_tokens // 2,  # Force shorter generation (half the target)
                 temperature=0.1,  # Use deterministic generation for consistency
-                stop_sequences=["<|im_end|>", "</s>", "\n\n", "Original text", "ORIGINAL:", "End of response.", "---"],
+                stop_sequences=[
+                    "<|im_end|>", "</s>", "<|endoftext|>", "End of response.",
+                    "Good night", "Thank you", "Sweet dreams",  # Conversational loops
+                    "Feel free", "Is there anything",  # Question loops
+                    "..." * 5,  # Excessive ellipses
+                ],
                 repetition_penalty=1.5  # Higher penalty to avoid repetition
             )
             
@@ -513,6 +513,23 @@ CONCISE SUMMARY  6000 tokens max):
             'confidence': None
         }
         
+        # Extract binary prediction first (prioritize over probabilities)
+        binary_patterns = [
+            r'\*\*PREDICTION:?\*\*[\s:]*([01])',
+            r'PREDICTION:[\s]*([01])',
+            r'Prediction:[\s]*([01])',
+            r'Final Prediction:[\s]*([01])',
+            r'\*\*Final Prediction:?\*\*[\s:]*([01])',
+        ]
+        binary_prediction_found = False
+        for pattern in binary_patterns:
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                result['prediction'] = int(match.group(1))
+                binary_prediction_found = True
+                print(f"Debug: Found binary prediction {result['prediction']} with pattern: {pattern}")
+                break
+        
         # Extract mortality probability - comprehensive patterns matching reparse scripts
         mortality_patterns = [
             r'\*\*MORTALITY PROBABILITY:?\*\*[\s:]*([0-9]*\.?[0-9]+)',
@@ -559,78 +576,73 @@ CONCISE SUMMARY  6000 tokens max):
         ground_truth = result.get('ground_truth', None)
         
         # Determine prediction with improved fallback logic
+        # Priority: binary prediction > probabilities > fallback
         mort_prob = result['mortality_probability']
         surv_prob = result['survival_probability']
         
-        if mort_prob is not None and surv_prob is not None:
-            # Both probabilities available - normal case
-            result['prediction'] = 1 if mort_prob > surv_prob else 0
+        if binary_prediction_found:
+            # Binary prediction already extracted - highest priority
             result['is_fallback'] = False
+            print(f"Debug: Using binary prediction: {result['prediction']}")
             
-        elif mort_prob is None and surv_prob is None:
-            # Both None - fallback to opposite of ground truth
+        elif mort_prob is not None and surv_prob is not None:
+            # Both probabilities available - derive binary prediction
+            if result['prediction'] is None:  # Only if not already set
+                result['prediction'] = 1 if mort_prob > surv_prob else 0
+            result['is_fallback'] = False
+            print(f"Debug: Derived prediction from probabilities: mort={mort_prob}, surv={surv_prob}, pred={result['prediction']}")
+            
+        elif mort_prob is not None and surv_prob is None:
+            # Only mortality prob available
+            if result['prediction'] is None:  # Only if not already set
+                if mort_prob > 0.5:
+                    result['prediction'] = 1
+                    result['is_fallback'] = False
+                else:
+                    # mort_prob < 0.5, fallback to opposite of ground truth
+                    if ground_truth is not None:
+                        result['prediction'] = 1 - ground_truth
+                    else:
+                        result['prediction'] = 0
+                    result['is_fallback'] = True
+            print(f"Debug: Using mortality probability: {mort_prob}, pred={result['prediction']}")
+                    
+        elif surv_prob is not None and mort_prob is None:
+            # Only survival prob available
+            if result['prediction'] is None:  # Only if not already set
+                if surv_prob > 0.5:
+                    result['prediction'] = 0
+                    result['is_fallback'] = False
+                else:
+                    # surv_prob < 0.5, fallback to opposite of ground truth
+                    if ground_truth is not None:
+                        result['prediction'] = 1 - ground_truth
+                    else:
+                        result['prediction'] = 1
+                    result['is_fallback'] = True
+            print(f"Debug: Using survival probability: {surv_prob}, pred={result['prediction']}")
+                    
+        elif result['prediction'] is None:
+            # No binary prediction and no probabilities - fallback to opposite of ground truth
             if ground_truth is not None:
                 result['prediction'] = 1 - ground_truth
             else:
                 result['prediction'] = 0  # Default fallback
             result['is_fallback'] = True
-                
-        elif mort_prob is not None and surv_prob is None:
-            # Only mortality prob available
-            if mort_prob > 0.5:
-                result['prediction'] = 1
-                result['is_fallback'] = False
-            else:
-                # mort_prob < 0.5, fallback to opposite of ground truth
-                if ground_truth is not None:
-                    result['prediction'] = 1 - ground_truth
-                else:
-                    result['prediction'] = 0
-                result['is_fallback'] = True
-                    
-        else:  # surv_prob is not None and mort_prob is None
-            # Only survival prob available
-            if surv_prob > 0.5:
-                result['prediction'] = 0
-                result['is_fallback'] = False
-            else:
-                # surv_prob < 0.5, fallback to opposite of ground truth
-                if ground_truth is not None:
-                    result['prediction'] = 1 - ground_truth
-                else:
-                    result['prediction'] = 1
-                result['is_fallback'] = True
+            print(f"Debug: Fallback prediction (no data): {result['prediction']}")
         
         return result
     
     def _parse_tool_call(self, response_text):
         """
         Parse tool call from agent response.
-        Supports dual-query retrieval for integrator (separate MedCorp and UMLS queries).
         
         Args:
             response_text: Agent's response text
             
         Returns:
-            Dict with 'medcorp_query' and 'umls_query' (either can be None for optional retrieval)
-            OR tuple of (tool_name, query) for backward compatibility with single-query format
+            Tuple of (tool_name, query) or (None, None) if no tool call found
         """
-        # First try dual-query format (new integrator format)
-        # Pattern: <search_medcorp>query</search_medcorp> and/or <search_umls>query</search_umls>
-        medcorp_match = re.search(r'<search_medcorp>\s*(.{10,}?)\s*</search_medcorp>', 
-                                   response_text, re.DOTALL)
-        umls_match = re.search(r'<search_umls>\s*(.{10,}?)\s*</search_umls>', 
-                              response_text, re.DOTALL)
-        
-        if medcorp_match or umls_match:
-            # Dual-query format detected
-            queries = {
-                'medcorp_query': medcorp_match.group(1).strip() if medcorp_match else None,
-                'umls_query': umls_match.group(1).strip() if umls_match else None
-            }
-            return queries
-        
-        # Fallback: try single-query format (backward compatibility)
         # Look for tool call patterns (in order of specificity)
         patterns = [
             # Search-R1 format: <search>query</search> (trained format from post-training)
@@ -659,26 +671,19 @@ CONCISE SUMMARY  6000 tokens max):
         
         return None, None
     
-    def _execute_tool_call(self, tool_name_or_queries, query=None, qid=None, log_dir=None):
+    def _execute_tool_call(self, tool_name, query, qid=None, log_dir=None):
         """
         Execute a tool call for integrator agent.
-        Supports both single-query (backward compatibility) and dual-query retrieval.
         
         Args:
-            tool_name_or_queries: Either tool name (str) for single query, or dict with medcorp_query/umls_query
-            query: Query parameter for single-query mode (optional, used only if tool_name_or_queries is str)
+            tool_name: Name of the tool to call
+            query: Query parameter for the tool (LLM-generated, may need truncation)
             qid: Question ID for logging
             log_dir: Log directory
             
         Returns:
-            Tool execution result (list of retrieved documents)
+            Tool execution result
         """
-        # Check if dual-query format (dict with medcorp_query/umls_query keys)
-        if isinstance(tool_name_or_queries, dict):
-            return self._execute_dual_retrieval(tool_name_or_queries, qid=qid, log_dir=log_dir)
-        
-        # Single-query format (backward compatibility)
-        tool_name = tool_name_or_queries
         if tool_name == "retrieve" and self.rag_enabled:
             retrieval_tool = self.retrieval_tools.get("round3")  # Use round3 tool for integrator
             if retrieval_tool:
@@ -697,119 +702,6 @@ CONCISE SUMMARY  6000 tokens max):
         
         print(f"[ERROR] Unknown tool or RAG disabled: {tool_name}")
         return []
-    
-    def _execute_dual_retrieval(self, queries_dict, qid=None, log_dir=None):
-        """
-        Execute dual-query retrieval for integrator (separate MedCorp and UMLS queries).
-        
-        Args:
-            queries_dict: Dict with 'medcorp_query' and 'umls_query' (either can be None)
-            qid: Question ID for logging
-            log_dir: Log directory
-            
-        Returns:
-            Combined list of retrieved documents from both sources
-        """
-        if not self.rag_enabled:
-            print("[DUAL RETRIEVAL] RAG disabled, skipping retrieval")
-            return []
-        
-        medcorp_query = queries_dict.get('medcorp_query')
-        umls_query = queries_dict.get('umls_query')
-        
-        # Truncation limit for LLM-generated queries
-        MAX_INTEGRATOR_QUERY_TOKENS = 2048
-        MAX_INTEGRATOR_QUERY_CHARS = MAX_INTEGRATOR_QUERY_TOKENS * 4
-        
-        all_retrieved_snippets = []
-        all_scores = []
-        
-        # Track separate results for logging
-        medcorp_snippets = []
-        medcorp_scores = []
-        umls_snippets = []
-        umls_scores = []
-        
-        # Retrieve from MedCorp if query provided
-        if medcorp_query and hasattr(self.medrag, 'source_retrievers'):
-            truncated_query = medcorp_query[:MAX_INTEGRATOR_QUERY_CHARS]
-            if len(medcorp_query) > MAX_INTEGRATOR_QUERY_CHARS:
-                print(f"[DUAL RETRIEVAL MedCorp] Truncating query from {len(medcorp_query)} to {MAX_INTEGRATOR_QUERY_CHARS} chars")
-            
-            print(f"[DUAL RETRIEVAL MedCorp] Query: {truncated_query[:100]}... [{len(truncated_query)} chars]")
-            
-            if "medcorp" in self.medrag.source_retrievers:
-                snippets, scores = self.medrag.source_retrievers["medcorp"].retrieve(
-                    truncated_query, k=4, rrf_k=60
-                )
-                medcorp_snippets = snippets
-                medcorp_scores = scores
-                all_retrieved_snippets.extend(snippets)
-                all_scores.extend(scores)
-                print(f"[DUAL RETRIEVAL MedCorp] Retrieved {len(snippets)} documents")
-        
-        # Retrieve from UMLS if query provided
-        if umls_query and hasattr(self.medrag, 'source_retrievers'):
-            truncated_query = umls_query[:MAX_INTEGRATOR_QUERY_CHARS]
-            if len(umls_query) > MAX_INTEGRATOR_QUERY_CHARS:
-                print(f"[DUAL RETRIEVAL UMLS] Truncating query from {len(umls_query)} to {MAX_INTEGRATOR_QUERY_CHARS} chars")
-            
-            print(f"[DUAL RETRIEVAL UMLS] Query: {truncated_query[:100]}... [{len(truncated_query)} chars]")
-            
-            if "umls" in self.medrag.source_retrievers:
-                snippets, scores = self.medrag.source_retrievers["umls"].retrieve(
-                    truncated_query, k=4, rrf_k=60
-                )
-                umls_snippets = snippets
-                umls_scores = scores
-                all_retrieved_snippets.extend(snippets)
-                all_scores.extend(scores)
-                print(f"[DUAL RETRIEVAL UMLS] Retrieved {len(snippets)} documents")
-        
-        # If no retrieval performed, return empty
-        if not all_retrieved_snippets:
-            print("[DUAL RETRIEVAL] No queries provided or no documents retrieved")
-            return []
-        
-        # Format retrieved documents (keep all 8: 4 from MedCorp + 4 from UMLS)
-        retrieved_snippets = all_retrieved_snippets  # No truncation - keep all 8 docs
-        scores = all_scores
-        
-        print(f"[DUAL RETRIEVAL] Total documents to inject: {len(retrieved_snippets)} (MedCorp: {len(medcorp_snippets)}, UMLS: {len(umls_snippets)})")
-        
-        # Format as expected by integrator
-        docs_text = "\n\n".join([
-            f"Document {i+1} (Score: {scores[i]:.3f}):\n{doc.get('title', 'Untitled')}\n{doc.get('content', '')}"
-            for i, doc in enumerate(retrieved_snippets)
-        ])
-        
-        # Log retrieval - create separate logs for each source + combined
-        if log_dir and qid:
-            # Log MedCorp retrieval separately
-            if medcorp_query and medcorp_snippets:
-                medcorp_log_path = os.path.join(log_dir, f"retrieve_integrator_medcorp_{qid}.json")
-                with open(medcorp_log_path, 'w') as f:
-                    json.dump({
-                        'query': medcorp_query,
-                        'source': 'medcorp',
-                        'retrieved_docs': medcorp_snippets,
-                        'scores': medcorp_scores
-                    }, f, indent=2)
-                print(f"[DUAL RETRIEVAL] Logged MedCorp retrieval to {os.path.basename(medcorp_log_path)}")
-            
-            # Log UMLS retrieval separately
-            if umls_query and umls_snippets:
-                umls_log_path = os.path.join(log_dir, f"retrieve_integrator_umls_{qid}.json")
-                with open(umls_log_path, 'w') as f:
-                    json.dump({
-                        'query': umls_query,
-                        'source': 'umls',
-                        'retrieved_docs': umls_snippets,
-                        'scores': umls_scores
-                    }, f, indent=2)
-                print(f"[DUAL RETRIEVAL] Logged UMLS retrieval to {os.path.basename(umls_log_path)}")
-        
-        return docs_text
     
     def _format_retrieved_docs_for_context(self, retrieved_docs):
         """
@@ -920,138 +812,38 @@ CONCISE SUMMARY  6000 tokens max):
         try:
             start_time = time.time()
             
-            # Step 1: Generate initial response (allow BOTH queries to be generated before stopping)
-            # Remove dual-query stop sequences to let model generate both <search_medcorp> and <search_umls>
-            # We'll manually detect where to truncate after getting the full response
-            
+            # Step 1: Generate until </search> tag
             tool_response = self.integrator_llm(
                 initial_prompt,
-                max_tokens=8192,  # Enough for both queries plus reasoning
+                max_tokens=2048,  # Just enough for search query
                 temperature=0.5,
                 top_p=0.9,
                 return_format='string',
-                stop_sequences=["<|im_end|>", "</s>"],  # Only stop at end tokens, not at search tags
+                stop_sequences=["</search>", "<|im_end|>", "</s>", "\n\n\n", "---", "###"],
                 repetition_penalty=1.15,
                 enable_thinking=True
             )
             
-            # Detect and truncate response at the appropriate point
-            # For dual-query: truncate after BOTH closing tags
-            # For single-query: truncate after one closing tag
-            truncated_response = tool_response
+            # Add closing tag if model didn't generate it
+            if "</search>" not in tool_response:
+                tool_response += "</search>"
             
-            if "<search_medcorp>" in tool_response or "<search_umls>" in tool_response:
-                # Dual-query format detected - find where both queries end
-                medcorp_end = tool_response.find("</search_medcorp>")
-                umls_end = tool_response.find("</search_umls>")
-                
-                # Find the last closing tag position
-                last_tag_end = max(medcorp_end, umls_end)
-                
-                if last_tag_end > 0:
-                    # Truncate after the last closing tag (add tag length)
-                    truncate_pos = last_tag_end + len("</search_medcorp>")  # Both tags same length
-                    truncated_response = tool_response[:truncate_pos]
-                
-                # Add missing closing tags if needed
-                if "<search_medcorp>" in truncated_response and "</search_medcorp>" not in truncated_response:
-                    truncated_response += "</search_medcorp>"
-                if "<search_umls>" in truncated_response and "</search_umls>" not in truncated_response:
-                    truncated_response += "</search_umls>"
-                    
-            elif "<search>" in tool_response:
-                # Single-query format - truncate after first </search>
-                search_end = tool_response.find("</search>")
-                if search_end > 0:
-                    truncate_pos = search_end + len("</search>")
-                    truncated_response = tool_response[:truncate_pos]
-                elif "</search>" not in truncated_response:
-                    # Add closing tag if missing
-                    truncated_response += "</search>"
+            # Step 2: Parse search query
+            tool_name, query = self._parse_tool_call(tool_response)
             
-            tool_response = truncated_response
-            
-            # Step 2: Parse search query (dual or single)
-            parsed_result = self._parse_tool_call(tool_response)
-            
-            # Determine format
-            is_dual_query = isinstance(parsed_result, dict)
-            
-            # Initialize variables for backward compatibility
-            tool_name = None
-            query = None
-            
-            if is_dual_query:
-                print(f"[DEBUG] Dual-query format detected")
-                print(f"[DEBUG] MedCorp query: '{parsed_result.get('medcorp_query', 'None')}'")
-                print(f"[DEBUG] UMLS query: '{parsed_result.get('umls_query', 'None')}'")
-                if logger:
-                    logger.info(f"INTEGRATOR INITIAL RESPONSE (DUAL): {tool_response}")
-                    logger.info(f"PARSED DUAL QUERIES: medcorp='{parsed_result.get('medcorp_query')}', umls='{parsed_result.get('umls_query')}'")
-            else:
-                tool_name, query = parsed_result
-                print(f"[DEBUG] Single-query format detected")
-                print(f"[DEBUG] Parsed tool_name: {tool_name}")
-                print(f"[DEBUG] Parsed query: '{query}'")
-                if logger:
-                    logger.info(f"INTEGRATOR INITIAL RESPONSE: {tool_response}")
-                    logger.info(f"PARSED TOOL CALL: tool='{tool_name}', query='{query}'")
+            print(f"[DEBUG] Initial generation length: {len(tool_response)}")
+            print(f"[DEBUG] Parsed tool_name: {tool_name}")
+            print(f"[DEBUG] Parsed query: '{query}'")
+            if logger:
+                logger.info(f"INTEGRATOR INITIAL RESPONSE: {tool_response}")
+                logger.info(f"PARSED TOOL CALL: tool='{tool_name}', query='{query}'")
             
             # Initialize
             retrieved_docs = []
             full_response = tool_response
             
-            # Step 3: Execute retrieval if queries found
-            if is_dual_query and (parsed_result.get('medcorp_query') or parsed_result.get('umls_query')):
-                # Dual-query retrieval
-                medcorp_q = parsed_result.get('medcorp_query')
-                umls_q = parsed_result.get('umls_query')
-                print(f"[INTEGRATOR DUAL] Executing dual retrieval:")
-                print(f"  MedCorp: '{medcorp_q[:100] if medcorp_q else 'None'}...'")
-                print(f"  UMLS: '{umls_q[:100] if umls_q else 'None'}...'")
-                
-                # Execute dual retrieval
-                qid = f"{patient_id}_{int(time.time())}"
-                retrieved_docs_text = self._execute_tool_call(parsed_result, qid=qid, log_dir=log_dir)
-                
-                if retrieved_docs_text:
-                    information_block = f"\n\n<information>\n{retrieved_docs_text}\n</information>\n\n"
-                    
-                    # Continue generation with injected information
-                    continuation_prompt = initial_prompt + tool_response + information_block
-                    
-                    print(f"[INTEGRATOR DUAL] Continuing generation with retrieved docs...")
-                    
-                    continued_response = self.integrator_llm(
-                        continuation_prompt,
-                        max_tokens=32768,
-                        temperature=0.5,
-                        top_p=0.9,
-                        return_format='string',
-                        stop_sequences=["<|im_end|>", "</s>"],
-                        repetition_penalty=1.15,
-                        enable_thinking=True
-                    )
-                    
-                    full_response = tool_response + information_block + continued_response
-                else:
-                    # No docs retrieved, continue without information
-                    print(f"[INTEGRATOR DUAL] No docs retrieved, continuing without information")
-                    continued_response = self.integrator_llm(
-                        initial_prompt + tool_response,
-                        max_tokens=32768,
-                        temperature=0.5,
-                        top_p=0.9,
-                        return_format='string',
-                        stop_sequences=["<|im_end|>", "</s>"],
-                        repetition_penalty=1.15,
-                        enable_thinking=True
-                    )
-                    full_response = tool_response + continued_response
-                    
-            elif not is_dual_query and tool_name == "retrieve" and query:
-                # Single-query retrieval (backward compatibility)
-                print(f"[INTEGRATOR SINGLE] Executing search: '{query[:100]}...'")
+            if tool_name == "retrieve" and query:
+                print(f"[INTEGRATOR] Executing search: '{query[:100]}...'")
                 
                 # Execute retrieval
                 qid = f"integrator_combined_{patient_id}"
@@ -1067,7 +859,7 @@ CONCISE SUMMARY  6000 tokens max):
                 # Step 3: Continue generation with injected information
                 continuation_prompt = initial_prompt + tool_response + information_block
                 
-                print(f"[INTEGRATOR SINGLE] Continuing generation with {len(retrieved_docs)} retrieved docs...")
+                print(f"[INTEGRATOR] Continuing generation with {len(retrieved_docs)} retrieved docs...")
                 
                 continued_response = self.integrator_llm(
                     continuation_prompt,
@@ -1075,8 +867,17 @@ CONCISE SUMMARY  6000 tokens max):
                     temperature=0.5,
                     top_p=0.9,
                     return_format='string',
-                    stop_sequences=["<|im_end|>", "</s>"],
-                    repetition_penalty=1.15,
+                    stop_sequences=[
+                        "<|im_end|>", "</s>", "<|endoftext|>",
+                        "\n\n\n\n", "---\n---",  # Multiple newlines or separators
+                        "Good night", "Sweet dreams", "Sleep well", "Take care!",  # Conversational endings
+                        "```\n\n", "Feel free", "Is there anything",  # Common LLM artifacts
+                        "Thank you", "You're welcome",  # Politeness loops
+                        "If you need", "Would you like", "Can I help",  # Question loops
+                        "References:", "Bibliography:", "Sources:",  # Reference sections that may loop
+                        "..." * 10,  # Repetitive ellipses
+                    ],
+                    repetition_penalty=1.3,  # Increased penalty
                     enable_thinking=True
                 )
                 
@@ -1092,8 +893,17 @@ CONCISE SUMMARY  6000 tokens max):
                     temperature=0.5,
                     top_p=0.9,
                     return_format='string',
-                    stop_sequences=["<|im_end|>", "</s>"],
-                    repetition_penalty=1.15,
+                    stop_sequences=[
+                        "<|im_end|>", "</s>", "<|endoftext|>",
+                        "\n\n\n\n", "---\n---",  # Multiple newlines or separators
+                        "Good night", "Sweet dreams", "Sleep well", "Take care!",  # Conversational endings
+                        "```\n\n", "Feel free", "Is there anything",  # Common LLM artifacts
+                        "Thank you", "You're welcome",  # Politeness loops
+                        "If you need", "Would you like", "Can I help",  # Question loops
+                        "References:", "Bibliography:", "Sources:",  # Reference sections that may loop
+                        "..." * 10,  # Repetitive ellipses
+                    ],
+                    repetition_penalty=1.3,  # Increased penalty
                     enable_thinking=True
                 )
                 full_response = tool_response + continued_response
@@ -1129,19 +939,6 @@ CONCISE SUMMARY  6000 tokens max):
                 logger.info(f"EXTRACTED SURVIVAL PROBABILITY: {survival_prob}")
                 logger.info(f"FINAL PREDICTION: {final_prediction}")
             
-            # Prepare query info for logging (handle both dual and single query formats)
-            query_info = None
-            if is_dual_query:
-                medcorp_q = parsed_result.get('medcorp_query')
-                umls_q = parsed_result.get('umls_query')
-                if medcorp_q or umls_q:
-                    query_info = {
-                        'medcorp_query': medcorp_q,
-                        'umls_query': umls_q
-                    }
-            elif tool_name == "retrieve" and query:
-                query_info = query
-            
             return {
                 'role': 'balanced_clinical_integrator',
                 'message': full_response,
@@ -1153,7 +950,7 @@ CONCISE SUMMARY  6000 tokens max):
                 'generation_time': generation_time,
                 'prompt_length': len(initial_prompt),
                 'response_length': len(full_response),
-                'query': query_info,
+                'query': query if tool_name == "retrieve" else None,
                 'retrieved_docs': retrieved_docs
             }
             
@@ -1224,9 +1021,30 @@ CONCISE SUMMARY  6000 tokens max):
                         message = message[:500] + "..."
                     history_text += f"\n### {agent_name}:\n{message}\n"
             
-            # Retrieval disabled for Round 1 agents (mortality_risk_assessor, protective_factor_analyst)
+            # Perform retrieval if RAG is enabled
             retrieved_docs = []
             retrieval_context = ""
+            if self.rag_enabled and role in ["mortality_risk_assessor", "protective_factor_analyst", "balanced_clinical_integrator"]:
+                try:
+                    # Use appropriate retrieval tool for current round
+                    retrieval_tool = self.retrieval_tools.get("round2", None)
+                    if retrieval_tool:
+                        retrieval_func = retrieval_tool["func"]
+                        
+                        # Create agent-specific retrieval query with FULL patient context
+                        # Use label-blind retrieval - all agents get same patient context
+                        retrieval_query = patient_context
+                        
+                        # Use agent-specific qid for proper log file naming
+                        retrieval_qid = f"{role}_{patient_id}"
+                        retrieved_docs = retrieval_func(retrieval_query, qid=retrieval_qid, log_dir=log_dir)
+                        
+                        if retrieved_docs:
+                            retrieval_context = "\n## Retrieved Medical Evidence:\n"
+                            for idx, doc in enumerate(retrieved_docs[:8]):
+                                retrieval_context += f"\n[Evidence {idx+1}]: {doc.get('content', '')[:400]}...\n"
+                except Exception as e:
+                    print(f"Warning: Retrieval failed for {role}: {e}")
             
             # Build context based on agent role
             if role == "mortality_risk_assessor":
@@ -1408,22 +1226,41 @@ Provide your clinical analysis and mortality risk assessment:"""
                     history_text += f"{agent_role}: {message} [Prediction: {prediction}]\n"
                 history_text += "\n"
         
-        # Perform retrieval if RAG is enabled (only for integrator)
+        # Perform retrieval if RAG is enabled
         retrieved_docs = []
         retrieval_context = ""
-        if self.rag_enabled and role == "balanced_clinical_integrator":
-            # Only integrator uses retrieval in _agent_turn
-            retrieval_tool = self.retrieval_tools.get("round1")
+        if self.rag_enabled and role in ["mortality_risk_assessor", "protective_factor_analyst", "balanced_clinical_integrator"]:
+            # Determine which retrieval tool to use based on role
+            if role == "medical_knowledge_integrator":
+                retrieval_tool = self.retrieval_tools.get("round3")
+            else:
+                retrieval_tool = self.retrieval_tools.get("round1")
             
             if retrieval_tool:
-                # For integrator, use prepared history (already has individual round summaries if needed)
-                query = self._convert_labels_in_text(f"{patient_context}\n\nDebate Summary:\n{history_text}")
+                # Generate query based on role and available context
+                if role == "mortality_risk_assessor":
+                    similar_positive = similar_patients.get('positive', '')
+                    # Truncate similar patients if too long, but keep full patient context
+                    if len(similar_positive) > 6000:
+                        similar_positive = similar_positive[:6000] + "...[truncated for retrieval]"
+                    # Label-blind retrieval: no mention of "mortality" or "death" outcomes
+                    query = self._convert_labels_in_text(f"{patient_context}\n\nSimilar patient cases:\n{similar_positive}")
+                elif role == "protective_factor_analyst":
+                    similar_negative = similar_patients.get('negative', '')
+                    # Truncate similar patients if too long, but keep full patient context
+                    if len(similar_negative) > 6000:
+                        similar_negative = similar_negative[:6000] + "...[truncated for retrieval]"
+                    # Label-blind retrieval: no mention of "survival" outcomes
+                    query = self._convert_labels_in_text(f"{patient_context}\n\nSimilar patient cases:\n{similar_negative}")
+                else:  # balanced_clinical_integrator
+                    # For integrator, use prepared history (already has individual round summaries if needed)
+                    query = self._convert_labels_in_text(f"{patient_context}\n\nDebate Summary:\n{history_text}")
                 
                 print(f"[RETRIEVE] Query length: {len(query)} chars (no truncation)")
                 
                 # Retrieve documents with patient ID and log directory for saving
                 retrieval_qid = f"{role}_{patient_id}"
-                retrieved_docs = retrieval_tool["func"](query, qid=retrieval_qid, log_dir=log_dir)
+                retrieved_docs = retrieval_tool["func"](query, qid=retrieval_qid, log_dir=log_dir)  # Remove arbitrary truncation
                 
                 # Format retrieval context
                 if retrieved_docs:
@@ -1461,11 +1298,15 @@ Provide your clinical analysis and mortality risk assessment:"""
             primary_context = f"## Similar Patient Cases ##\n{similar_patients.get('negative', 'No similar cases available for analysis.')}"
         else:  # balanced_clinical_integrator
             primary_context = f"## Target Patient EHR Context ##\n{patient_context}"
+            if medical_knowledge:
+                secondary_context = f"\n## Medical Knowledge ##\n{medical_knowledge}"
+            else:
+                secondary_context = ""
         
         # Build full prompt with retrieval context
         prompt = f"""{system_prompt}
 
-{primary_context}
+{primary_context}{secondary_context}
 
 {retrieval_context}{history_text}
 
@@ -1513,8 +1354,17 @@ Provide your clinical analysis and mortality risk assessment:"""
                 temperature=temperature,
                 top_p=0.9,
                 return_format='string',  # Ensure we get a string response
-                stop_sequences=["<|im_end|>", "</s>", "End of response.", "---"],  # Remove boxed stop sequences to allow completion
-                repetition_penalty=1.15,  # Add repetition penalty for better generation quality
+                stop_sequences=[
+                    "<|im_end|>", "</s>", "<|endoftext|>",
+                    "End of response.", "---\n---",
+                    "\n\n\n\n",  # Multiple blank lines
+                    "Good night", "Sweet dreams", "Sleep well",  # Conversational endings
+                    "Thank you", "You're welcome",  # Politeness loops
+                    "If you need", "Feel free", "Is there anything",  # Question loops
+                    "References:", "Bibliography:",  # Reference sections
+                    "..." * 10,  # Excessive ellipses
+                ],
+                repetition_penalty=1.25,  # Increased penalty
                 enable_thinking=True
             )
             
@@ -1535,7 +1385,14 @@ Provide your clinical analysis and mortality risk assessment:"""
                         temperature=0.8,  # Increase temperature for more creativity
                         top_p=0.95,       # Increase top_p for more diversity
                         return_format='string',
-                        stop_sequences=["<|im_end|>", "</s>"],  # Simplified stop sequences
+                        stop_sequences=[
+                    "<|im_end|>", "</s>", "<|endoftext|>",
+                    "End of response.", "---\n---",
+                    "\n\n\n\n",  # Multiple blank lines
+                    "MORTALITY PROBABILITY:", "SURVIVAL PROBABILITY:",  # Should not appear in analysts
+                    "References:", "Bibliography:",  # Reference loops
+                    "Good night", "Sweet dreams", "Thank you for",  # Conversational loops
+                    "..." * 10],
                         repetition_penalty=1.2,  # Higher repetition penalty
                         enable_thinking=True
                     )
@@ -1825,21 +1682,21 @@ Provide your clinical analysis and mortality risk assessment:"""
                     final_prediction = None
         
         print(f"\n{'='*80}")
-        print(f"DEBATE COMPLETED - Final Prediction: {final_prediction}")
+        print(f"DEBATE COMPLETED - Final Binary Prediction: {final_prediction}")
         if final_mortality_prob is not None:
-            print(f"Final Mortality Probability: {final_mortality_prob}")
+            print(f"Mortality Probability (optional): {final_mortality_prob:.3f}")
         if final_survival_prob is not None:
-            print(f"Final Survival Probability: {final_survival_prob}")
+            print(f"Survival Probability (optional): {final_survival_prob:.3f}")
         if final_confidence is not None:
-            print(f"Final Confidence Level: {final_confidence}")
+            print(f"Confidence Level: {final_confidence}")
         print(f"{'='*80}")
         
         # Log final result and probabilities
-        logger.info(f"DEBATE COMPLETED - Final Prediction: {final_prediction}")
+        logger.info(f"DEBATE COMPLETED - Final Binary Prediction: {final_prediction}")
         if final_mortality_prob is not None:
-            logger.info(f"Final Mortality Probability: {final_mortality_prob}")
+            logger.info(f"Mortality Probability (optional): {final_mortality_prob:.3f}")
         if final_survival_prob is not None:
-            logger.info(f"Final Survival Probability: {final_survival_prob}")
+            logger.info(f"Survival Probability (optional): {final_survival_prob:.3f}")
         if final_confidence is not None:
             logger.info(f"Final Confidence Level: {final_confidence}")
         logger.info(f"Debate history: {len(debate_history)} rounds completed")

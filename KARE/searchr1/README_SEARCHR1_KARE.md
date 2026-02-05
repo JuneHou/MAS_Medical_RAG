@@ -51,7 +51,7 @@ This document explains how Search-R1 Reinforcement Learning training works for t
 │   Model generates: <search>query</search> OR <answer>X</answer>│
 │                                                              │
 │   Sample 1: <search>mortality risk diabetes</search>        │
-│      → Calls retriever → Gets 5 documents → Continue        │
+│      → Calls retriever → Gets 4 documents → Continue        │
 │   Sample 2: <answer>Low risk, patient stable</answer>       │
 │      → Done=True → Finished (removed from active batch)     │
 │   Sample 3: <search>sepsis elderly prognosis</search>       │
@@ -210,13 +210,9 @@ def execute_predictions(predictions, active_mask):
 
 ---
 
-### 5. Reward Functions: Two Experimental Approaches
+### 5. Reward Function: Binary Label Match
 
 Search-R1 uses a **sparse reward** system - you only get rewarded at the **end of the episode** (no penalties for number of search actions, invalid intermediate responses, or sequence length).
-
----
-
-#### **Experiment 1: Binary Label Match (Search-R1 Default)**
 
 **How it works:**
 - Search-R1's default reward extracts the final `<answer>...</answer>` tag
@@ -270,152 +266,6 @@ def compute_score_em(solution_str, ground_truth):
 
 ---
 
-#### **Experiment 2: Probability-Based Calibration Reward (Custom)**
-
-**Target output format:**
-```
-<answer>
-MORTALITY PROBABILITY: 0.XX
-SURVIVAL PROBABILITY: 0.YY
-</answer>
-```
-
-Where `SURVIVAL = 1.0 - MORTALITY` (enforced constraint).
-
-**Reward Design Options:**
-
-##### **Option A: Positive-Only Reward (Recommended for Search-R1)**
-
-Uses positive rewards scaled by prediction quality:
-
-```python
-def compute_score_prob_positive(solution_str, ground_truth):
-    """
-    Positive-only reward based on probability calibration.
-    
-    Reward formula:
-    - Mortality cases (GT=1): reward = mortality_prob
-    - Survival cases (GT=0): reward = survival_prob = 1 - mortality_prob
-    
-    Range: [0.0, 1.0]
-    """
-    # Extract probabilities from <answer> tag
-    mort_prob = extract_mortality_probability(solution_str)
-    
-    if mort_prob is None:
-        return 0.0  # Invalid format
-    
-    if not (0.0 <= mort_prob <= 1.0):
-        return 0.0  # Out of range
-    
-    # Ground truth from parquet
-    gt_label = int(ground_truth['target'][0])  # 0 or 1
-    
-    if gt_label == 1:  # Mortality case
-        # Reward high mortality predictions
-        reward = mort_prob
-    else:  # Survival case (gt_label == 0)
-        # Reward high survival predictions
-        reward = 1.0 - mort_prob
-    
-    return reward  # Range: [0.0, 1.0]
-```
-
-**Example:**
-
-| Sample | GT | Final Answer | Mort Prob | Surv Prob | Reward |
-|--------|----|--------------|-----------|-----------|----|
-| 1 | 1 (Mortality) | MORT: 0.85, SURV: 0.15 | 0.85 | 0.15 | **0.85** ✓ |
-| 2 | 0 (Survival) | MORT: 0.20, SURV: 0.80 | 0.20 | 0.80 | **0.80** ✓ |
-| 3 | 1 (Mortality) | MORT: 0.30, SURV: 0.70 | 0.30 | 0.70 | **0.30** ✗ (low) |
-| 4 | 0 (Survival) | MORT: 0.75, SURV: 0.25 | 0.75 | 0.25 | **0.25** ✗ (low) |
-
-**Pros:**
-- ✅ Incentivizes probability calibration
-- ✅ Smooth gradient (easier optimization)
-- ✅ No negative rewards (stable GRPO training)
-
-**Cons:**
-- ❌ No strong penalty for wrong direction (mort=0.55 on survival still gets 0.45 reward)
-
----
-
-##### **Option B: Symmetric ±1/0/-1 Reward (Stronger Signal)**
-
-Uses penalties for wrong predictions and neutral zone for uncertainty:
-
-```python
-def compute_score_prob_symmetric(solution_str, ground_truth):
-    """
-    Symmetric reward with penalties for wrong predictions.
-    
-    Thresholds:
-    - High confidence: mort < 0.4 or mort ≥ 0.7
-    - Uncertain: mort ∈ [0.4, 0.7)
-    
-    Returns: +1 (correct direction), 0 (uncertain), -1 (wrong direction)
-    """
-    mort_prob = extract_mortality_probability(solution_str)
-    
-    if mort_prob is None or not (0.0 <= mort_prob <= 1.0):
-        return -1.0  # Invalid format gets penalty
-    
-    gt_label = int(ground_truth['target'][0])
-    
-    if gt_label == 1:  # Mortality case
-        if mort_prob >= 0.7:
-            return +1.0  # Correctly high mortality
-        elif mort_prob >= 0.4:
-            return 0.0   # Uncertain
-        else:
-            return -1.0  # Incorrectly low mortality
-    
-    else:  # Survival case (gt_label == 0)
-        if mort_prob < 0.4:
-            return +1.0  # Correctly low mortality
-        elif mort_prob < 0.7:
-            return 0.0   # Uncertain
-        else:
-            return -1.0  # Incorrectly high mortality
-```
-
-**Example:**
-
-| Sample | GT | Mort Prob | Reward | Reason |
-|--------|----|-----------|----|--------|
-| 1 | 1 (Mortality) | 0.85 | **+1.0** ✓ | High mort for mort case |
-| 2 | 0 (Survival) | 0.20 | **+1.0** ✓ | Low mort for surv case |
-| 3 | 1 (Mortality) | 0.55 | **0.0** ~ | Uncertain (0.4-0.7 range) |
-| 4 | 0 (Survival) | 0.75 | **-1.0** ✗ | High mort for surv case |
-| 5 | 1 (Mortality) | 0.30 | **-1.0** ✗ | Low mort for mort case |
-
-**Pros:**
-- ✅ Strong penalty for wrong direction (faster learning)
-- ✅ Neutral zone prevents over-confidence on borderline cases
-- ✅ Clear separation between good/uncertain/bad predictions
-
-**Cons:**
-- ❌ Negative rewards may slow GRPO convergence initially
-- ❌ Harder thresholds (0.4/0.7 may need tuning)
-
----
-
-#### **Recommendation:**
-
-**Start with Option A (Positive-Only)** for initial training:
-- Simpler optimization landscape
-- Proven to work in Search-R1's GRPO framework
-- Smooth gradients for calibration learning
-
-**Switch to Option B (±1/0/-1)** if you observe:
-- Model predicting wrong direction frequently (e.g., mort=0.6 on survival cases)
-- Need stronger differentiation between good/bad predictions
-- Reward variance too low (all predictions clustered around 0.5)
-
-Both options work with GRPO's advantage normalization - the choice depends on how aggressive you want the learning signal to be.
-
----
-
 #### **Why No Intermediate Penalties?**
 
 Search-R1's sparse reward focuses **only on final answer quality**:
@@ -435,28 +285,17 @@ Search-R1's sparse reward focuses **only on final answer quality**:
    metrics['env/ratio_of_valid_action'] = 1.0  # All actions properly formatted
 ---
 
-#### **What the Model Learns Across Both Experiments:**
+#### **What the Model Learns:**
 
-**Experiment 1 (Binary Label):**
 - ✅ Predict correct outcome (0 or 1)
 - ✅ Use search to improve prediction accuracy
-- ❌ No calibration (doesn't learn probability quality)
-
-**Experiment 2 (Probability-Based):**
-- ✅ Predict correct outcome direction
-- ✅ Calibrate probabilities to reflect true risk
-- ✅ Express uncertainty (via 0.4-0.7 range in Option B)
-- ✅ Learn when to search for better probability estimates
+- ✅ Format outputs correctly (`<answer>0</answer>` or `<answer>1</answer>`)
 
 **Training signal flow:**
 ```
-Episode → Final Answer → Extract Probabilities → Compute Reward → Advantage Estimation → Policy Gradient
-                                                        ↓
-                                    Higher reward for accurate, calibrated
-```
-Episode → Final Answer → Reward (0-1) → Advantage Estimation → Policy Gradient
+Episode → Final Answer → Extract answer from <answer> tag → Compare with ground_truth → Reward (0 or 1) → Advantage Estimation → Policy Gradient
                                               ↓
-                            Higher reward for efficient, accurate predictions
+                            Higher reward for correct predictions
 ```
 
 ---
@@ -577,9 +416,9 @@ From your training logs:
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │ 3. Compute rewards (sparse, end-of-episode)                     │
-│    → Extract mortality probability from final answers           │
-│    → Compare with ground_truth: reward ∈ [0, 1]                 │
-│    → No penalties for searching or invalid actions              │
+│    → Extract answer from final <answer> tag                      │
+│    → Compare with ground_truth: reward 1.0 (match) or 0.0 (mismatch)│
+│    → No penalties for searching or invalid actions               │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -609,220 +448,18 @@ All without explicit penalties - the sparse reward + GRPO advantage normalizatio
 
 ---
 
-## Implementing the Two Experiments
+## Implementation (Binary Label Match)
 
-### Experiment 1: Binary Label Match (Current Setup)
+**Status:** ✅ Current setup (Search-R1 default)
 
-**Status:** ✅ Ready to use (Search-R1 default)
+**Data:** Generated at `searchr1/data/kare_mortality_single_agent/`
 
-**Data:** Already generated at `searchr1/data/kare_mortality_single_agent/`
-
-**Prompt format:** Model outputs binary prediction in `<answer>` tag
+**Prompt format:** Model outputs binary prediction in `<answer>` tag:
 ```
 <answer>1</answer>  # For mortality prediction
 <answer>0</answer>  # For survival prediction
 ```
 
-**Training command:** Use existing `train_searchr1_single_agent.sh` as-is
-
----
-
-### Experiment 2: Probability-Based Calibration (Requires Custom Reward)
-
-**Status:** 🔧 Requires implementation
-
-#### **Step 1: Update Prompt to Request Both Probabilities**
-
-Modify [prepare_searchr1_balanced_data.py](data_generation/prepare_searchr1_balanced_data.py):
-
-```python
-def create_single_agent_prompt(sample: Dict) -> str:
-    prompt = f"""You are a medical AI assistant specialized in mortality prediction.
-Your task is to assess patient mortality risk and provide calibrated probability estimates.
-
-You must conduct reasoning inside <think> and </think> tags every time you analyze information.
-If you need additional medical evidence, search for relevant clinical information by writing <search>query</search>.
-The search engine will return medical literature between <information> and </information> tags.
-You can search multiple times to gather comprehensive evidence.
-
-When confident in your assessment, provide your final answer with BOTH probabilities:
-<answer>
-MORTALITY PROBABILITY: 0.XX
-SURVIVAL PROBABILITY: 0.YY
-</answer>
-
-Note: The two probabilities must sum to 1.0 (SURVIVAL = 1.0 - MORTALITY).
-
-## Target Patient
-{target_context}
-
-## Similar Patient Cases
-...
-"""
-```
-
-#### **Step 2: Create Custom Reward Function**
-
-Create `searchr1/reward_functions/kare_mortality_probability.py`:
-
-```python
-import re
-
-# Regex to extract probabilities from <answer> tag
-MORT_PROB_RE = re.compile(r'MORTALITY PROBABILITY:\s*([0-9]*\.?[0-9]+)', re.IGNORECASE)
-SURV_PROB_RE = re.compile(r'SURVIVAL PROBABILITY:\s*([0-9]*\.?[0-9]+)', re.IGNORECASE)
-
-def extract_probabilities(solution_str):
-    """Extract mortality and survival probabilities from answer."""
-    mort_match = MORT_PROB_RE.search(solution_str)
-    surv_match = SURV_PROB_RE.search(solution_str)
-    
-    mort_prob = float(mort_match.group(1)) if mort_match else None
-    surv_prob = float(surv_match.group(1)) if surv_match else None
-    
-    return mort_prob, surv_prob
-
-def compute_score_prob_positive(solution_str, ground_truth, **kwargs):
-    """
-    Option A: Positive-only reward (recommended).
-    
-    Reward = mortality_prob if GT=1, else 1-mortality_prob
-    Range: [0.0, 1.0]
-    """
-    mort_prob, surv_prob = extract_probabilities(solution_str)
-    
-    # Validation
-    if mort_prob is None:
-        return 0.0  # No mortality probability found
-    
-    if not (0.0 <= mort_prob <= 1.0):
-        return 0.0  # Invalid range
-    
-    # Optional: Check if probabilities sum to 1.0 (with tolerance)
-    if surv_prob is not None:
-        if abs((mort_prob + surv_prob) - 1.0) > 0.05:
-            return 0.0  # Probabilities don't sum to 1.0
-    
-    # Extract ground truth label
-    gt_label = int(ground_truth['target'][0])  # 0 or 1
-    
-    # Compute reward
-    if gt_label == 1:  # Mortality case
-        reward = mort_prob
-    else:  # Survival case
-        reward = 1.0 - mort_prob
-    
-    return reward
-
-def compute_score_prob_symmetric(solution_str, ground_truth, **kwargs):
-    """
-    Option B: Symmetric ±1/0/-1 reward.
-    
-    Thresholds: mort < 0.4 (low), [0.4, 0.7) (uncertain), ≥ 0.7 (high)
-    Returns: +1 (correct), 0 (uncertain), -1 (wrong)
-    """
-    mort_prob, surv_prob = extract_probabilities(solution_str)
-    
-    # Validation
-    if mort_prob is None or not (0.0 <= mort_prob <= 1.0):
-        return -1.0  # Invalid format gets penalty
-    
-    if surv_prob is not None:
-        if abs((mort_prob + surv_prob) - 1.0) > 0.05:
-            return -1.0  # Probabilities don't sum to 1.0
-    
-    gt_label = int(ground_truth['target'][0])
-    
-    if gt_label == 1:  # Mortality case
-        if mort_prob >= 0.7:
-            return +1.0  # Correctly high
-        elif mort_prob >= 0.4:
-            return 0.0   # Uncertain
-        else:
-            return -1.0  # Incorrectly low
-    else:  # Survival case
-        if mort_prob < 0.4:
-            return +1.0  # Correctly low
-        elif mort_prob < 0.7:
-            return 0.0   # Uncertain
-        else:
-            return -1.0  # Incorrectly high
-
-# Default export (choose which to use)
-compute_score = compute_score_prob_positive  # or compute_score_prob_symmetric
-```
-
-#### **Step 3: Register Custom Reward in Search-R1**
-
-Add to Search-R1's reward registry (`Search-R1/verl/utils/reward_score/__init__.py`):
-
-```python
-from searchr1.reward_functions.kare_mortality_probability import compute_score as kare_prob_reward
-
-REWARD_REGISTRY = {
-    # ... existing rewards ...
-    'kare_mortality_prob': kare_prob_reward,
-}
-```
-
-Or use custom reward path in training script:
-
-```bash
-# In train_searchr1_single_agent.sh, add:
-+custom_reward_function.path="/path/to/kare_mortality_probability.py" \
-+custom_reward_function.name="compute_score"
-```
-
-#### **Step 4: Regenerate Data with New Prompt**
-
-```bash
-cd /data/wang/junh/githubs/Debate/KARE
-
-# Update prompt in prepare_searchr1_balanced_data.py (Step 1)
-# Then regenerate data
-python searchr1/data_generation/prepare_searchr1_balanced_data.py \
-    --balanced_json searchr1/data_generation/train_balanced_100pos_100neg.json \
-    --split train \
-    --output_dir searchr1/data/kare_mortality_prob
-
-python searchr1/data_generation/prepare_searchr1_balanced_data.py \
-    --balanced_json searchr1/data_generation/val_balanced_25pos_25neg.json \
-    --split val \
-    --output_dir searchr1/data/kare_mortality_prob
-```
-
-#### **Step 5: Update Training Script**
-
-Modify `train_searchr1_single_agent.sh`:
-
-```bash
-# Change data path
-export DATA_DIR='/path/to/searchr1/data/kare_mortality_prob'
-export EXPERIMENT_NAME='searchr1-kare-mortality-prob'
-
-# Add custom reward (if not registered in __init__.py)
-# ... in python3 -m verl.trainer.main_ppo call:
-    +custom_reward_function.path="searchr1/reward_functions/kare_mortality_probability.py" \
-    +custom_reward_function.name="compute_score"
-```
-
-#### **Step 6: Train**
-
-```bash
-bash searchr1/train_searchr1_single_agent.sh
-```
-
----
-
-### Comparing the Two Experiments
-
-| Aspect | Experiment 1 (Binary) | Experiment 2 (Probability) |
-|--------|-----------------------|----------------------------|
-| **Output Format** | `<answer>0</answer>` or `<answer>1</answer>` | `MORTALITY PROBABILITY: 0.XX`<br>`SURVIVAL PROBABILITY: 0.YY` |
-| **Reward Range** | {0.0, 1.0} (binary) | **Option A:** [0.0, 1.0] (continuous)<br>**Option B:** {-1.0, 0.0, +1.0} |
-| **Training Signal** | Sparse (only correct/wrong) | Dense (quality of probability) |
-| **Calibration** | None | ✓ Learns probability quality |
-| **Uncertainty** | Cannot express | ✓ Can express via probabilities |
-| **Implementation** | ✓ Works out-of-box | Requires custom reward function |
+**Training command:** Use `train_searchr1_single_agent.sh` (or `test_searchr1_training.sh` for a quick test run).
 
 ---
