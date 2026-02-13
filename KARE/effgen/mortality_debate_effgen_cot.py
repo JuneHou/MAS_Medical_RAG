@@ -398,7 +398,23 @@ Note: The two probabilities MUST sum to exactly 1.00"""
             print(f"[{role}] Running agent with effgen...")
             # Import AgentMode to explicitly specify single agent execution
             from effgen.core.agent import AgentMode
-            result = agent.run(prompt, mode=AgentMode.SINGLE)
+            
+            # Set agent-specific max_tokens (match original vllm)
+            agent_max_tokens = {
+                "mortality_risk_assessor": 2048,
+                "protective_factor_analyst": 2048,
+                "balanced_clinical_integrator": 4096
+            }
+            max_tokens = agent_max_tokens.get(role, 2048)
+            
+            result = agent.run(
+                prompt,
+                mode=AgentMode.SINGLE,
+                top_p=0.9,  # Match original vllm
+                max_tokens=max_tokens,
+                repetition_penalty=1.2,  # Match original vllm
+                stop_sequences=["<|im_end|>", "</s>"]  # Match original vllm
+            )
             
             # Extract response text
             if hasattr(result, 'output'):

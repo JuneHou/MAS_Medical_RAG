@@ -26,7 +26,7 @@ except ImportError:
 # Import effGen debate systems
 try:
     from mortality_debate_effgen_cot import MortalityDebateSystemEffGen as MortalityDebateCOT
-    from mortality_debate_effgen_rag import MortalityDebateSystemEffGenRAG as MortalityDebateRAG
+    #from mortality_debate_effgen_rag import MortalityDebateSystemEffGenRAG as MortalityDebateRAG
 except ImportError as e:
     print(f"Error importing effGen debate systems: {e}")
     print("Make sure mortality_debate_effgen_cot.py and mortality_debate_effgen_rag.py are in the same directory")

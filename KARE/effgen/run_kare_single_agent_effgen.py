@@ -2,6 +2,18 @@
 """
 Runner script for KARE single-agent experiments using effGen (CoT and RAG).
 Supports both zero-shot and few-shot modes.
+
+RAG mode uses:
+  - mortality_single_agent_effgen_rag.py (single-agent with MedRAG retrieval)
+  - effgen_medrag_tool.py (MedRAG retrieval tool for effGen)
+
+Usage:
+  # From KARE/effgen/ (recommended)
+  cd /path/to/KARE/effgen
+  python run_kare_single_agent_effgen.py --mode rag --in_context zero-shot --gpus 0,1
+
+  # From KARE/
+  python effgen/run_kare_single_agent_effgen.py --mode rag --in_context zero-shot --gpus 0,1
 """
 
 import os
@@ -13,23 +25,30 @@ from pathlib import Path
 from typing import Dict, List, Any
 from tqdm import tqdm
 
-# Add parent directory for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Paths: script dir = effgen/, parent = KARE
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_script_dir)
+# So that effgen/*.py (mortality_single_agent_effgen_rag, effgen_medrag_tool, etc.) are importable
+sys.path.insert(0, _script_dir)
+# So that KARE/kare_data_adapter.py is importable
+sys.path.insert(0, _parent_dir)
 
 # Import KARE data adapter (from parent directory)
 try:
     from kare_data_adapter import KAREDataAdapter
 except ImportError:
-    print("Error: kare_data_adapter.py not found in parent directory")
+    print("Error: kare_data_adapter.py not found in KARE directory")
+    print(f"  Expected at: {os.path.join(_parent_dir, 'kare_data_adapter.py')}")
     sys.exit(1)
 
-# Import effGen single-agent systems
+# Import effGen single-agent systems (from effgen directory)
 try:
     from mortality_single_agent_effgen_cot import MortilitySingleAgentEffGenCoT
     from mortality_single_agent_effgen_rag import MortilitySingleAgentEffGenRAG
 except ImportError as e:
     print(f"Error importing effGen single-agent systems: {e}")
-    print("Make sure the implementation files are in the same directory")
+    print(f"  Make sure mortality_single_agent_effgen_rag.py, mortality_single_agent_effgen_cot.py,")
+    print(f"  and effgen_medrag_tool.py are in: {_script_dir}")
     sys.exit(1)
 
 
@@ -205,9 +224,8 @@ def run_single_agent_evaluation(start_idx: int = 0,
     # Initialize components
     try:
         print("Loading KARE data adapter...")
-        # Use parent directory path for data
-        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        data_adapter = KAREDataAdapter(base_path=os.path.join(parent_dir, "data"))
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # KARE
+        data_adapter = KAREDataAdapter(base_path=os.path.join(base_dir, "data"))
         
         print(f"Initializing single-agent {mode.upper()} system (effGen)...")
         if mode.lower() == "rag":

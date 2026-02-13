@@ -3,6 +3,11 @@
 Single-Agent RAG System for KARE Mortality Prediction using effGen
 With MedRAG retrieval from MedCorp2 corpus
 Supports both zero-shot and few-shot modes
+
+ReACT agent pattern: follows effgen example `agentic_search_agent.py`:
+- Agent with tools (MedRAGRetrievalTool), system_prompt, max_iterations=5
+- Single agent.run(prompt) — effGen runs the ReAct loop (tool use + reasoning) internally
+- No explicit mode parameter; sub-agents and memory disabled for reproducibility
 """
 
 import os
@@ -193,8 +198,8 @@ Note: Focus on combinations of conditions, procedures, and medications that indi
             log_dir=log_dir
         )
         
-        # Create agent with retrieval tool
-        # System prompt with explicit tool usage instruction (following effgen example pattern)
+        # Create agent with retrieval tool (ReACT pattern from effgen examples/agentic_search_agent.py)
+        # System prompt instructs tool use; max_iterations=5 allows retrieval + reasoning steps
         system_prompt = """You are a medical AI Clinical Assistant with access to medical evidence retrieval.
 
 CRITICAL: You MUST use the retrieve_medical_evidence tool to search for clinical evidence BEFORE making any prediction. Never make predictions without first retrieving evidence.

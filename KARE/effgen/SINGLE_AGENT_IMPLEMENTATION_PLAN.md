@@ -193,67 +193,42 @@ class MortilitySingleAgentEffGenCoT:
         return {'final_prediction': prediction, ...}
 ```
 
-### Phase 2: effGen RAG Mode
+### Phase 2: effGen RAG Mode (ReACT Agent)
 
 **File**: `mortality_single_agent_effgen_rag.py`
 
 **Class**: `MortilitySingleAgentEffGenRAG`
 
+**Pattern**: ReACT agent as in effgen example `agentic_search_agent.py` — one agent with tools, system prompt that instructs tool use, `max_iterations=5`, single `agent.run(prompt)`.
+
 **Key Features**:
-1. Single effGen agent with MedRAG tool
-2. Two-step process (like VLLM):
-   - Step 1: Agent requests retrieval
-   - Step 2: Agent makes prediction with supplementary info
+1. Single effGen agent with MedRAG tool (ReAct loop: tool use + reasoning in one run)
+2. **Not** a manual two-step call: effGen runs the ReAct loop internally (retrieve then reason)
 3. Supports zero-shot and few-shot modes
-4. Reuses `MedRAGRetrievalTool` from debate system
+4. Uses `MedRAGRetrievalTool` from `effgen_medrag_tool.py`
 
 **Implementation Details**:
 ```python
-class MortilitySingleAgentEffGenRAG:
-    def __init__(self,
-                 model_name: str,
-                 gpu_ids: str,
-                 in_context: str = "zero-shot",
-                 ...):
-        # Initialize MedRAG first
-        self.medrag = MedRAG(...)
-        
-        # Load model
-        self.model = load_model(model_name)
-        
-        # Create retrieval tool
-        self.retrieval_tool = MedRAGRetrievalTool(self.medrag, k=8)
-        
-        # Create agent WITH tool
-        self.agent = Agent(
-            config=AgentConfig(
-                name="mortality_predictor_rag",
-                model=self.model,
-                tools=[self.retrieval_tool],  # Include retrieval tool
-                system_prompt="",
-                max_iterations=3,  # Allow for retrieval + reasoning
-                temperature=0.5
-            )
-        )
-    
-    def predict_mortality(self, ...):
-        # Step 1: Initial prompt requesting retrieval
-        retrieval_prompt = build_retrieval_request_prompt(...)
-        result = self.agent.run(retrieval_prompt)
-        
-        # Step 2: Parse tool call and execute retrieval
-        # (effgen should handle this automatically via tool)
-        
-        # Step 3: Final prediction with supplementary info
-        # (continuation of agent run or new call with retrieved docs)
-        
-        return {'final_prediction': prediction, ...}
+# ReACT pattern (see effgen examples/agentic_search_agent.py)
+self.agent = Agent(
+    config=AgentConfig(
+        name="mortality_predictor_rag",
+        model=self.model,
+        tools=[self.retrieval_tool],
+        system_prompt="""You are a medical AI... MUST use retrieve_medical_evidence...""",
+        max_iterations=5,   # Match effgen example (retrieval + reasoning)
+        temperature=0.5,
+        enable_sub_agents=False,
+        enable_memory=False
+    )
+)
+# Single run — effGen handles tool calls and reasoning in one ReAct loop
+result = self.agent.run(prompt)
 ```
 
 **Challenges**:
-1. effGen agent tool integration may differ from manual two-step process
-2. May need to adapt to effGen's tool-calling mechanism
-3. Query truncation (200 chars in VLLM RAG) needs implementation
+1. Query truncation (200 chars in VLLM RAG) implemented via `max_query_tokens=50` in MedRAGRetrievalTool
+2. System prompt must explicitly instruct the model to use the tool before predicting
 
 ### Phase 3: Runner Script
 
@@ -297,17 +272,43 @@ effgen/results/
 | In-Context | Always uses similar patients | Optional (zero-shot/few-shot) |
 | Complexity | Higher (debate flow) | Lower (single call) |
 
-## Hyperparameter Mapping
+## ReACT Agent Pattern (effgen `agentic_search_agent.py`)
+
+**RAG mode** uses the same ReACT (Reasoning + Acting) agent pattern as the effgen example `examples/agentic_search_agent.py`:
+
+| Aspect | effgen example (`agentic_search_agent.py`) | Our implementation (`mortality_single_agent_effgen_rag.py`) |
+|--------|-------------------------------------------|-------------------------------------------------------------|
+| **Agent** | `Agent(config=AgentConfig(...))` | Same |
+| **Tools** | `tools=[agentic_search, Calculator()]` | `tools=[self.retrieval_tool]` (MedRAGRetrievalTool) |
+| **System prompt** | Instructs use of knowledge base | Instructs use of `retrieve_medical_evidence` before prediction |
+| **Max iterations** | `max_iterations=5` | `max_iterations=5` (retrieval + reasoning steps) |
+| **Inference** | `result = agent.run(question)` | `result = self.agent.run(prompt)` — no mode argument |
+| **Sub-agents** | Not used | `enable_sub_agents=False` |
+| **Memory** | Not used | `enable_memory=False` |
+
+The agent runs a single `agent.run(prompt)`; effGen executes the ReAct loop internally (tool calls + model steps until stop or max_iterations). We do **not** pass a `mode` parameter; the presence of `tools` and a tool-directing system prompt is sufficient for ReAct behavior.
+
+---
+
+## Hyperparameter Mapping (VLLM → effGen)
+
+The **original KARE single-agent** uses VLLM with the parameters below. The **effGen implementation** uses the transformers backend (no VLLM in this runner). Mapping and differences:
 
 ### VLLM → effGen (Single-Agent)
 
-| VLLM Parameter | Value | effGen Equivalent |
-|----------------|-------|-------------------|
-| `temperature` | 0.5 | `temperature=0.5` in AgentConfig |
-| `max_tokens` | 32768 | Set via sampling params or config |
-| `top_p` | 0.9 | `top_p=0.9` in sampling params |
-| `repetition_penalty` | 1.2 | `repetition_penalty=1.2` |
-| `stop` | `["<|im_end|>", "</s>"]` | `stop` in sampling params |
+| VLLM Parameter | VLLM Value | effGen / Our Setting | Notes |
+|----------------|------------|----------------------|--------|
+| `temperature` | 0.5 | `temperature=0.5` in AgentConfig | ✅ Matched |
+| `max_tokens` | 32768 | Model default / effGen sampling | effGen uses model config; not set explicitly in AgentConfig |
+| `top_p` | 0.9 | Not set in AgentConfig | If needed, set via effGen model/sampling config |
+| `repetition_penalty` | 1.2 | Not set in AgentConfig | If needed, set via effGen model/sampling config |
+| `stop` | `["<|im_end|>", "</s>"]` | Model default | Model tokenizer handles stop tokens |
+
+### vLLM parameter changes when using effGen
+
+- **Backend**: This runner uses **effGen with transformers** (e.g. `load_model(..., device_map=...)`). It does **not** start a vLLM server; the original VLLM code uses a separate vLLM server and SamplingParams.
+- **Explicit in our code**: Only `temperature=0.5` is set in AgentConfig to match the original. Other sampling (max_tokens, top_p, repetition_penalty, stop) follow effGen/model defaults unless overridden in effGen’s config.
+- **To mirror VLLM more closely**: If effGen exposes `max_tokens`, `top_p`, `repetition_penalty`, or `stop` in AgentConfig or in the model loader, set them there to align with the table above.
 
 ### GPU Allocation
 

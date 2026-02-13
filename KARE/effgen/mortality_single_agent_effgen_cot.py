@@ -126,7 +126,6 @@ Note: Focus on combinations of conditions, procedures, and medications that indi
                 tools=[],  # No tools for CoT mode
                 system_prompt="",  # No system prompt for KARE style
                 max_iterations=1,  # Single-turn execution
-                temperature=0.5,  # Changed from 0.7 to 0.5
                 enable_sub_agents=False,  # Disable sub-agents
                 enable_memory=False  # Disable memory for reproducibility
             )
@@ -286,7 +285,15 @@ Output:"""
             print(f"[AGENT] Generating CoT response for {patient_id}...")
             # Import AgentMode to explicitly specify single agent execution
             from effgen.core.agent import AgentMode
-            result = self.agent.run(prompt, mode=AgentMode.SINGLE)
+            result = self.agent.run(
+                prompt,
+                mode=AgentMode.SINGLE,
+                temperature=0.7,  # Match original vllm
+                top_p=0.9,  # Match original vllm
+                max_tokens=32768,
+                repetition_penalty=1.2,  # Match original vllm
+                stop_sequences=["<|im_end|>", "</s>"]  # Match original vllm
+            )
             
             # Extract response text
             if hasattr(result, 'output'):
