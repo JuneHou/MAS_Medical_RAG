@@ -34,10 +34,11 @@ locate_answer = mirage_utils.locate_answer
 # CONFIGURATION
 # ============================================================================
 
-# GPU assignment for debate: GPU 0 for FAISS+embedding, GPU 1 for VLLM
-os.environ['CUDA_VISIBLE_DEVICES'] = '6,7'
+# GPU assignment for debate: first visible GPU for FAISS+embedding, second for VLLM.
+# Override with --gpu_ids (CLI) or by setting CUDA_VISIBLE_DEVICES in the shell.
+os.environ.setdefault('CUDA_VISIBLE_DEVICES', '6,7')
 
-# Model configuration - using optimized setup
+# Model configuration - override with --model (CLI).
 USE_VLLM_ENDPOINT = False
 HF_MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
 
@@ -1845,9 +1846,22 @@ if __name__ == "__main__":
                        help="Dataset split (default: test, auto-switched to dev for medmcqa)")
     parser.add_argument("--corpus_name", type=str, default="MedCorp",
                        help="Name of corpus to use (default: MedCorp)")
-    
+    parser.add_argument("--model", type=str, default=None,
+                       help=f"HuggingFace model ID (default: {HF_MODEL_NAME})")
+    parser.add_argument("--gpu_ids", type=str, default=None,
+                       help="Comma-separated CUDA device IDs (default: from CUDA_VISIBLE_DEVICES env or '6,7'). "
+                            "First ID is used for FAISS+embedding, second for VLLM.")
+
     args = parser.parse_args()
-    
+
+    # Apply CLI overrides for model and GPU assignment
+    if args.model:
+        HF_MODEL_NAME = args.model
+        print(f"Model override (--model): {HF_MODEL_NAME}")
+    if args.gpu_ids:
+        os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_ids
+        print(f"GPU override (--gpu_ids): CUDA_VISIBLE_DEVICES={args.gpu_ids}")
+
     # Update global rounds if specified
     MAX_ROUNDS = args.rounds
     log_dir = os.path.join(args.log_dir, args.dataset, args.corpus_name, args.mode)
