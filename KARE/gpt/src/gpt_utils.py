@@ -391,6 +391,9 @@ def extract_probabilities(response: str) -> Dict[str, Any]:
     
     # Extract mortality probability
     mortality_patterns = [
+        # both-bold (gpt-oss-120b emits this):  **MORTALITY PROBABILITY:** **0.62**
+        r'\*\*MORTALITY PROBABILITY:?\*\*[\s:]*\*\*([0-9]*\.?[0-9]+)\*\*',
+        r'\*\*Mortality Probability:?\*\*[\s:]*\*\*([0-9]*\.?[0-9]+)\*\*',
         r'\*\*MORTALITY PROBABILITY:?\*\*[\s:]*([0-9]*\.?[0-9]+)',
         r'\*\*Mortality Probability:?\*\*[\s:]*([0-9]*\.?[0-9]+)',
         r'MORTALITY PROBABILITY:[\s:]*\*\*([0-9]*\.?[0-9]+)\*\*',  # Handle: MORTALITY PROBABILITY: **0.45**
@@ -407,6 +410,9 @@ def extract_probabilities(response: str) -> Dict[str, Any]:
     
     # Extract survival probability
     survival_patterns = [
+        # both-bold (gpt-oss-120b emits this):  **SURVIVAL PROBABILITY:** **0.38**
+        r'\*\*SURVIVAL PROBABILITY:?\*\*[\s:]*\*\*([0-9]*\.?[0-9]+)\*\*',
+        r'\*\*Survival Probability:?\*\*[\s:]*\*\*([0-9]*\.?[0-9]+)\*\*',
         r'\*\*SURVIVAL PROBABILITY:?\*\*[\s:]*([0-9]*\.?[0-9]+)',
         r'\*\*Survival Probability:?\*\*[\s:]*([0-9]*\.?[0-9]+)',
         r'SURVIVAL PROBABILITY:[\s:]*\*\*([0-9]*\.?[0-9]+)\*\*',  # Handle: SURVIVAL PROBABILITY: **0.55**
