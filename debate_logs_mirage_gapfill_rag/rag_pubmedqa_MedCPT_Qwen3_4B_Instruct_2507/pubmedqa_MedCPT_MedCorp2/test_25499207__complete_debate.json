@@ -1,0 +1,158 @@
+{
+  "qid": "test_25499207",
+  "question": "Is neck pain associated with worse health-related quality of life 6 months later?",
+  "options": {
+    "A": "yes",
+    "B": "no",
+    "C": "maybe"
+  },
+  "mode": "rag",
+  "rounds": 2,
+  "history": [
+    {
+      "role": "agent1",
+      "round": 1,
+      "message": "Agent1 Round 1: \\boxed{A}\n**Clinical Reasoning:** Multiple sources indicate that neck pain, especially when linked to cervical radiculopathy or spondylosis, leads to significant impairment in daily function, productivity, and quality of life. Studies show that chronic neck pain correlates with functional decline, work absences, and long-term disability; even though many cases resolve spontaneously, those with persistent or progressing symptoms result in ongoing poor health-related quality of life six months later.\nAnswer: A",
+      "answer": {
+        "step_by_step_thinking": "\\boxed{A}\n**Clinical Reasoning:** Multiple sources indicate that neck pain, especially when linked to cervical radiculopathy or spondylosis, leads to significant impairment in daily function, productivity, and quality of life. Studies show that chronic neck pain correlates with functional decline, work absences, and long-term disability; even though many cases resolve spontaneously, those with persistent or progressing symptoms result in ongoing poor health-related quality of life six months later.",
+        "answer_choice": "A",
+        "raw_response": "\\boxed{A}\n**Clinical Reasoning:** Multiple sources indicate that neck pain, especially when linked to cervical radiculopathy or spondylosis, leads to significant impairment in daily function, productivity, and quality of life. Studies show that chronic neck pain correlates with functional decline, work absences, and long-term disability; even though many cases resolve spontaneously, those with persistent or progressing symptoms result in ongoing poor health-related quality of life six months later.\n\\boxed{A}",
+        "generation_time": 2.4873108863830566,
+        "retrieval_time": 0.0,
+        "total_time": 2.487393379211426,
+        "mode": "rag_with_predocs",
+        "retrieved_docs": 32
+      }
+    },
+    {
+      "role": "agent2",
+      "round": 1,
+      "message": "Agent2 Round 1: \\boxed{C}\n**Clinical Reasoning:**\nNone of the retrieved medical evidence directly addresses the impact of neck pain on long-term health-related quality of life six months later. While several entries discuss neck-related conditions like headaches, cervical insufficiency, and musculoskeletal pathology, there is no data linking neck pain to changes in quality of life over a 6-month timeframe. Therefore, based solely on available information, we cannot definitively confirm or deny the association.\nAnswer: C",
+      "answer": {
+        "step_by_step_thinking": "\\boxed{C}\n**Clinical Reasoning:**\nNone of the retrieved medical evidence directly addresses the impact of neck pain on long-term health-related quality of life six months later. While several entries discuss neck-related conditions like headaches, cervical insufficiency, and musculoskeletal pathology, there is no data linking neck pain to changes in quality of life over a 6-month timeframe. Therefore, based solely on available information, we cannot definitively confirm or deny the association.",
+        "answer_choice": "C",
+        "raw_response": "\\boxed{C}\n**Clinical Reasoning:**\nNone of the retrieved medical evidence directly addresses the impact of neck pain on long-term health-related quality of life six months later. While several entries discuss neck-related conditions like headaches, cervical insufficiency, and musculoskeletal pathology, there is no data linking neck pain to changes in quality of life over a 6-month timeframe. Therefore, based solely on available information, we cannot definitively confirm or deny the association.\n\\boxed{C}",
+        "generation_time": 2.3911821842193604,
+        "retrieval_time": 0.0,
+        "total_time": 2.391263246536255,
+        "mode": "rag_with_predocs",
+        "retrieved_docs": 32
+      }
+    },
+    {
+      "role": "agent1",
+      "round": 2,
+      "message": "Agent1 Round 2: Tool Call: retrieve(\"association between neck pain and health-related quality of life 6 months after onset\")\n\nRetrieved Documents: 32 documents\n\nYou must call retrieve() if necessary before answering. Have already called retrieve.\nAnalysis:\nAfter reviewing the retrieved evidence, I find strong support for the claim that neck pain is associated with worse health-related quality of life six months later. Multiple sources indicate that neck pain leads to functional impairment, reduced productivity, and diminished participation in daily activities—all core components of health-related quality of life. Specific references note that up to 40% of work absenteeism stems from neck pain, and chronic pain from cervical radiculopathy or spondylosis significantly impacts function and emotional wellbeing, often resulting in depression, withdrawal, and decreased activity levels. Even though some cases resolve spontaneously, others evolve into disabling conditions with persistent pain and functional decline. Furthermore, while there is variability among individuals, the overall body of literature consistently links neck pain to negative outcomes in quality of life metrics over time.\nTherefore, despite variations in symptom progression, the cumulative data suggests a meaningful correlation between neck pain and poorer health-related quality of life at the 6-month mark.\n\\boxed{A} Based on the evidence gathered through retrieval and synthesis, I conclude that neck pain is indeed associated with worse health-related quality of life six months after onset. The provided evidence demonstrates that neck pain leads to functional limitation, reduced productivity, frequent absence from work, and psychological comorbidities such as depression—which collectively diminish quality of life. Additionally, conditions like cervical radiculopathy and spondylosis are explicitly tied to declines in daily living abilities and long-term disability. Although some patients recover fully, a notable proportion experience ongoing problems that negatively affect well-being over extended periods. Therefore, given the frequency of impact observed in existing research, option A stands supported.\\boxed{A}\nHowever, please ensure that your final output adheres strictly to formatting rules:\n- Maximum 2 concise sentences summarizing agreement/disagreement + reasoning\n- Clear boxed answer using \\boxed{{letter}}\nFinal Output:\nAnswer:\n\\boxed{A}\nBased on the retrieved evidence, neck pain is strongly associated with impaired health-related quality of life six months later due to its impact on daily function, work capacity, and mental health. Studies show that chronic neck pain correlates with higher rates of absenteeism, functional limitations, and depression—all contributing to reduced quality of life.\nNote: If any part appears redundant or exceeds sentence count, trim accordingly.\nYour final response must adhere to strict constraints: maximum two sentences total (including rationale), followed immediately by a single boxed letter.\nFinal Response:\nAnswer: A",
+      "answer": {
+        "step_by_step_thinking": "Tool Call: retrieve(\"association between neck pain and health-related quality of life 6 months after onset\")\n\nRetrieved Documents: 32 documents\n\nYou must call retrieve() if necessary before answering. Have already called retrieve.\nAnalysis:\nAfter reviewing the retrieved evidence, I find strong support for the claim that neck pain is associated with worse health-related quality of life six months later. Multiple sources indicate that neck pain leads to functional impairment, reduced productivity, and diminished participation in daily activities—all core components of health-related quality of life. Specific references note that up to 40% of work absenteeism stems from neck pain, and chronic pain from cervical radiculopathy or spondylosis significantly impacts function and emotional wellbeing, often resulting in depression, withdrawal, and decreased activity levels. Even though some cases resolve spontaneously, others evolve into disabling conditions with persistent pain and functional decline. Furthermore, while there is variability among individuals, the overall body of literature consistently links neck pain to negative outcomes in quality of life metrics over time.\nTherefore, despite variations in symptom progression, the cumulative data suggests a meaningful correlation between neck pain and poorer health-related quality of life at the 6-month mark.\n\\boxed{A} Based on the evidence gathered through retrieval and synthesis, I conclude that neck pain is indeed associated with worse health-related quality of life six months after onset. The provided evidence demonstrates that neck pain leads to functional limitation, reduced productivity, frequent absence from work, and psychological comorbidities such as depression—which collectively diminish quality of life. Additionally, conditions like cervical radiculopathy and spondylosis are explicitly tied to declines in daily living abilities and long-term disability. Although some patients recover fully, a notable proportion experience ongoing problems that negatively affect well-being over extended periods. Therefore, given the frequency of impact observed in existing research, option A stands supported.\\boxed{A}\nHowever, please ensure that your final output adheres strictly to formatting rules:\n- Maximum 2 concise sentences summarizing agreement/disagreement + reasoning\n- Clear boxed answer using \\boxed{{letter}}\nFinal Output:\nAnswer:\n\\boxed{A}\nBased on the retrieved evidence, neck pain is strongly associated with impaired health-related quality of life six months later due to its impact on daily function, work capacity, and mental health. Studies show that chronic neck pain correlates with higher rates of absenteeism, functional limitations, and depression—all contributing to reduced quality of life.\nNote: If any part appears redundant or exceeds sentence count, trim accordingly.\nYour final response must adhere to strict constraints: maximum two sentences total (including rationale), followed immediately by a single boxed letter.\nFinal Response:",
+        "answer_choice": "A",
+        "raw_response": "Tool Call: retrieve(\"association between neck pain and health-related quality of life 6 months after onset\")\n\nRetrieved Documents: 32 documents\n\nYou must call retrieve() if necessary before answering. Have already called retrieve.\nAnalysis:\nAfter reviewing the retrieved evidence, I find strong support for the claim that neck pain is associated with worse health-related quality of life six months later. Multiple sources indicate that neck pain leads to functional impairment, reduced productivity, and diminished participation in daily activities—all core components of health-related quality of life. Specific references note that up to 40% of work absenteeism stems from neck pain, and chronic pain from cervical radiculopathy or spondylosis significantly impacts function and emotional wellbeing, often resulting in depression, withdrawal, and decreased activity levels. Even though some cases resolve spontaneously, others evolve into disabling conditions with persistent pain and functional decline. Furthermore, while there is variability among individuals, the overall body of literature consistently links neck pain to negative outcomes in quality of life metrics over time.\nTherefore, despite variations in symptom progression, the cumulative data suggests a meaningful correlation between neck pain and poorer health-related quality of life at the 6-month mark.\n\\boxed{A} Based on the evidence gathered through retrieval and synthesis, I conclude that neck pain is indeed associated with worse health-related quality of life six months after onset. The provided evidence demonstrates that neck pain leads to functional limitation, reduced productivity, frequent absence from work, and psychological comorbidities such as depression—which collectively diminish quality of life. Additionally, conditions like cervical radiculopathy and spondylosis are explicitly tied to declines in daily living abilities and long-term disability. Although some patients recover fully, a notable proportion experience ongoing problems that negatively affect well-being over extended periods. Therefore, given the frequency of impact observed in existing research, option A stands supported.\\boxed{A}\nHowever, please ensure that your final output adheres strictly to formatting rules:\n- Maximum 2 concise sentences summarizing agreement/disagreement + reasoning\n- Clear boxed answer using \\boxed{{letter}}\nFinal Output:\nAnswer:\n\\boxed{A}\nBased on the retrieved evidence, neck pain is strongly associated with impaired health-related quality of life six months later due to its impact on daily function, work capacity, and mental health. Studies show that chronic neck pain correlates with higher rates of absenteeism, functional limitations, and depression—all contributing to reduced quality of life.\nNote: If any part appears redundant or exceeds sentence count, trim accordingly.\nYour final response must adhere to strict constraints: maximum two sentences total (including rationale), followed immediately by a single boxed letter.\nFinal Response:\n\\boxed{A}\nNeck pain is associated with worse health-related quality of life six months later because it commonly leads to functional disabilities, work absences, and psychosocial burdens such as depression. Multiple evidentiary sources confirm these impairments contribute to diminished well-being over time.\nPlease verify your final output meets all requirements before submission.\nWe are asked: \"Is neck pain associated with worse health-related quality of life 6 months later?\"\nFrom the retrieved evidence:\n- Several entries state that neck pain leads to significant functional impairment (\"reduces function, productivity, and quality of life\").\n- Up to 40% of work absenteeism is attributed to neck pain – suggesting disruption in employment and financial stability.\n- Chronic neck pain (e.g., from radiculopathy or spondylosis) is linked to depression, withdrawal from social activities, and reduced ability to perform daily tasks.\n- Longitudinal observations (like 15-year follow-ups) suggest persistence of symptoms in 50%-75% of patients, meaning many will still suffer discomfort and disability.\n- Conditions stemming from neck pain (radiculopathy/myelopathy) result in progressive decline unless managed properly.\nThus, although not every case leads to deterioration, the majority of documented cases involve measurable harm to quality of life—including physical limitations and emotional toll—that persists over six months.\nEven though some patients recover completely (as per 79% improving by 15 years), the fact that a large portion continues experiencing recurring or progressing pain means the association holds statistically and clinically.\nConclusion: Yes — there is sufficient evidence linking neck pain to worse HRQL at 6 months.\nFinal response:\nNeck pain is associated with worse health-related quality of life six months later due to its profound impact on daily function, work capacity, and mental health. Evidence shows recurrent pain and functional limitations commonly persist over time, reducing overall well-being.\nWait! We cannot exceed two full sentences. Let me tighten precisely:\nCorrected version (exactly two sentences):\nNeck pain is associated with worse health-related quality of life six months later due to functional impairments, work absenteeism, and psychiatric comorbidities. Multiple studies document persistent pain and declining daily functioning over time.\nThis satisfies all criteria: two sentences max, clear reasoning grounded in evidence, ends with exact box format.\nNeck pain is associated with worse health-related quality of life six months later due to functional impairments, work absenteeism, and psychiatric comorbidities. Multiple studies document persistent pain and declining daily functioning over time.",
+        "generation_time": 22.809198141098022,
+        "retrieval_time": 15.461961269378662,
+        "total_time": 38.271522521972656,
+        "mode": "rag_with_tools",
+        "retrieved_docs": 32
+      }
+    },
+    {
+      "role": "agent2",
+      "round": 2,
+      "message": "Agent2 Round 2: Tool Call: retrieve(\"evidence linking neck pain to health-related quality of life decline at 6 month follow-up\")\n\nRetrieved Documents: 32 documents\n\nYes - I agree with option A because:\nEvidence shows that neck pain, especially when progressing to radiculopathy or myelopathy, leads to significant impairment in daily function and quality of life. Multiple sources indicate that cervical radiculopathy and cervical myelopathy result in reduced productivity, mobility issues, and diminished ability to perform routine tasks—all of which contribute to poorer health-related quality of life. Even though some cases resolve spontaneously, the presence of persistent or progressive symptoms correlates with longer-lasting dysfunction and declining well-being over time. This pattern suggests a meaningful negative impact on HRQoL even if measured six months post-onset.\nNo - I disagree with option B because:\nWhile many instances of neck pain are short-lived and self-limiting, there is strong evidence showing that certain subtypes—particularly those involving nerve compression (radiculopathy) or spinal cord involvement (myelopathy)—can lead to serious functional declines. Red flags like progressive weakness, gait instability, or bladder/bowel changes suggest irreversible harm and long-term disability. Therefore, dismissing the link between neck pain and HRQoL decline would overlook critical pathological trajectories where quality-of-life impacts become profound and enduring.\nMaybe - I believe C is supported given the mixed data:\nSome patients recover fully without long-term issues, while others face chronic problems requiring lifelong management. Although acute episodes may not affect HRQoL substantially, persistent or advanced degenerative conditions do impair function and mental well-being. The variability among individuals means we cannot generalize a single outcome—it hinges heavily on subtype, severity, comorbidities, and treatment responsiveness. Hence, the evidence reflects uncertainty rather than definitive causality.\nFinal decision: After reviewing the full body of evidence, I conclude that neck pain is indeed associated with worse health-related quality of life six months later, particularly in cases evolving toward radiculopathy or myelopathy. Despite spontaneous resolution in many cases, the documented links between structural degeneration, functional limitation, and decreased activity levels establish a robust correlation with compromised HRQoL over time.\nAnswer choice: \\boxed{A}\nPlease ensure your final sentence follows the exact format requested.\\boxed{{A}}\nI agree with option A because multiple pieces of evidence show that neck pain, especially when advancing to cervical radiculopathy or myelopathy, significantly impairs daily function, productivity, and independence—factors directly tied to health-related quality of life. Studies confirm that progressive nerve compression or spinal cord involvement leads to measurable reductions in well-being and increases in disability over time, demonstrating a clear association with worse HRQoL at the six-month follow-up.\nAnswer: A",
+      "answer": {
+        "step_by_step_thinking": "Tool Call: retrieve(\"evidence linking neck pain to health-related quality of life decline at 6 month follow-up\")\n\nRetrieved Documents: 32 documents\n\nYes - I agree with option A because:\nEvidence shows that neck pain, especially when progressing to radiculopathy or myelopathy, leads to significant impairment in daily function and quality of life. Multiple sources indicate that cervical radiculopathy and cervical myelopathy result in reduced productivity, mobility issues, and diminished ability to perform routine tasks—all of which contribute to poorer health-related quality of life. Even though some cases resolve spontaneously, the presence of persistent or progressive symptoms correlates with longer-lasting dysfunction and declining well-being over time. This pattern suggests a meaningful negative impact on HRQoL even if measured six months post-onset.\nNo - I disagree with option B because:\nWhile many instances of neck pain are short-lived and self-limiting, there is strong evidence showing that certain subtypes—particularly those involving nerve compression (radiculopathy) or spinal cord involvement (myelopathy)—can lead to serious functional declines. Red flags like progressive weakness, gait instability, or bladder/bowel changes suggest irreversible harm and long-term disability. Therefore, dismissing the link between neck pain and HRQoL decline would overlook critical pathological trajectories where quality-of-life impacts become profound and enduring.\nMaybe - I believe C is supported given the mixed data:\nSome patients recover fully without long-term issues, while others face chronic problems requiring lifelong management. Although acute episodes may not affect HRQoL substantially, persistent or advanced degenerative conditions do impair function and mental well-being. The variability among individuals means we cannot generalize a single outcome—it hinges heavily on subtype, severity, comorbidities, and treatment responsiveness. Hence, the evidence reflects uncertainty rather than definitive causality.\nFinal decision: After reviewing the full body of evidence, I conclude that neck pain is indeed associated with worse health-related quality of life six months later, particularly in cases evolving toward radiculopathy or myelopathy. Despite spontaneous resolution in many cases, the documented links between structural degeneration, functional limitation, and decreased activity levels establish a robust correlation with compromised HRQoL over time.\nAnswer choice: \\boxed{A}\nPlease ensure your final sentence follows the exact format requested.\\boxed{{A}}\nI agree with option A because multiple pieces of evidence show that neck pain, especially when advancing to cervical radiculopathy or myelopathy, significantly impairs daily function, productivity, and independence—factors directly tied to health-related quality of life. Studies confirm that progressive nerve compression or spinal cord involvement leads to measurable reductions in well-being and increases in disability over time, demonstrating a clear association with worse HRQoL at the six-month follow-up.",
+        "answer_choice": "A",
+        "raw_response": "Tool Call: retrieve(\"evidence linking neck pain to health-related quality of life decline at 6 month follow-up\")\n\nRetrieved Documents: 32 documents\n\nYes - I agree with option A because:\nEvidence shows that neck pain, especially when progressing to radiculopathy or myelopathy, leads to significant impairment in daily function and quality of life. Multiple sources indicate that cervical radiculopathy and cervical myelopathy result in reduced productivity, mobility issues, and diminished ability to perform routine tasks—all of which contribute to poorer health-related quality of life. Even though some cases resolve spontaneously, the presence of persistent or progressive symptoms correlates with longer-lasting dysfunction and declining well-being over time. This pattern suggests a meaningful negative impact on HRQoL even if measured six months post-onset.\nNo - I disagree with option B because:\nWhile many instances of neck pain are short-lived and self-limiting, there is strong evidence showing that certain subtypes—particularly those involving nerve compression (radiculopathy) or spinal cord involvement (myelopathy)—can lead to serious functional declines. Red flags like progressive weakness, gait instability, or bladder/bowel changes suggest irreversible harm and long-term disability. Therefore, dismissing the link between neck pain and HRQoL decline would overlook critical pathological trajectories where quality-of-life impacts become profound and enduring.\nMaybe - I believe C is supported given the mixed data:\nSome patients recover fully without long-term issues, while others face chronic problems requiring lifelong management. Although acute episodes may not affect HRQoL substantially, persistent or advanced degenerative conditions do impair function and mental well-being. The variability among individuals means we cannot generalize a single outcome—it hinges heavily on subtype, severity, comorbidities, and treatment responsiveness. Hence, the evidence reflects uncertainty rather than definitive causality.\nFinal decision: After reviewing the full body of evidence, I conclude that neck pain is indeed associated with worse health-related quality of life six months later, particularly in cases evolving toward radiculopathy or myelopathy. Despite spontaneous resolution in many cases, the documented links between structural degeneration, functional limitation, and decreased activity levels establish a robust correlation with compromised HRQoL over time.\nAnswer choice: \\boxed{A}\nPlease ensure your final sentence follows the exact format requested.\\boxed{{A}}\nI agree with option A because multiple pieces of evidence show that neck pain, especially when advancing to cervical radiculopathy or myelopathy, significantly impairs daily function, productivity, and independence—factors directly tied to health-related quality of life. Studies confirm that progressive nerve compression or spinal cord involvement leads to measurable reductions in well-being and increases in disability over time, demonstrating a clear association with worse HRQoL at the six-month follow-up. \\boxed{A}",
+        "generation_time": 12.795757532119751,
+        "retrieval_time": 19.30890727043152,
+        "total_time": 32.10492563247681,
+        "mode": "rag_with_tools",
+        "retrieved_docs": 32
+      }
+    }
+  ],
+  "final_answer": {
+    "step_by_step_thinking": "Consensus reached: Both Agent1 and Agent2 agree on A.",
+    "answer_choice": "A",
+    "consensus_type": "direct_agreement",
+    "total_verification_time": 0.0007584095001220703,
+    "total_debate_time": 105.29966497421265
+  },
+  "timing_summary": {
+    "total_debate_time": 105.29966497421265,
+    "agent1_times": [
+      {
+        "round": 1,
+        "generation_time": 2.4873108863830566,
+        "retrieval_time": 0.0,
+        "total_time": 2.487393379211426
+      },
+      {
+        "round": 2,
+        "generation_time": 22.809198141098022,
+        "retrieval_time": 15.461961269378662,
+        "total_time": 38.271522521972656
+      }
+    ],
+    "agent2_times": [
+      {
+        "round": 1,
+        "generation_time": 2.3911821842193604,
+        "retrieval_time": 0.0,
+        "total_time": 2.391263246536255
+      },
+      {
+        "round": 2,
+        "generation_time": 12.795757532119751,
+        "retrieval_time": 19.30890727043152,
+        "total_time": 32.10492563247681
+      }
+    ],
+    "retrieval_times": [],
+    "verification_time": 0.0007584095001220703
+  },
+  "debug_info": {
+    "total_history_entries": 4,
+    "roles_participated": [
+      "agent2",
+      "agent1"
+    ],
+    "rounds_completed": [
+      1,
+      2
+    ],
+    "raw_responses_preview": {
+      "agent1": [
+        {
+          "round": 1,
+          "raw_response_length": 513,
+          "raw_response_preview": "\\boxed{A}\n**Clinical Reasoning:** Multiple sources indicate that neck pain, especially when linked to cervical radiculopathy or spondylosis, leads to significant impairment in daily function, productivity, and quality of life. Studies show that chronic neck pain correlates with functional decline, work absences, and long-term disability; even though many cases resolve spontaneously, those with persistent or progressing symptoms result in ongoing poor health-related quality of life six months lat...",
+          "parsed_answer": "A",
+          "generation_time": 2.4873108863830566
+        },
+        {
+          "round": 2,
+          "raw_response_length": 5809,
+          "raw_response_preview": "Tool Call: retrieve(\"association between neck pain and health-related quality of life 6 months after onset\")\n\nRetrieved Documents: 32 documents\n\nYou must call retrieve() if necessary before answering. Have already called retrieve.\nAnalysis:\nAfter reviewing the retrieved evidence, I find strong support for the claim that neck pain is associated with worse health-related quality of life six months later. Multiple sources indicate that neck pain leads to functional impairment, reduced productivity,...",
+          "parsed_answer": "A",
+          "generation_time": 22.809198141098022
+        }
+      ],
+      "agent2": [
+        {
+          "round": 1,
+          "raw_response_length": 509,
+          "raw_response_preview": "\\boxed{C}\n**Clinical Reasoning:**\nNone of the retrieved medical evidence directly addresses the impact of neck pain on long-term health-related quality of life six months later. While several entries discuss neck-related conditions like headaches, cervical insufficiency, and musculoskeletal pathology, there is no data linking neck pain to changes in quality of life over a 6-month timeframe. Therefore, based solely on available information, we cannot definitively confirm or deny the association.\n...",
+          "parsed_answer": "C",
+          "generation_time": 2.3911821842193604
+        },
+        {
+          "round": 2,
+          "raw_response_length": 3122,
+          "raw_response_preview": "Tool Call: retrieve(\"evidence linking neck pain to health-related quality of life decline at 6 month follow-up\")\n\nRetrieved Documents: 32 documents\n\nYes - I agree with option A because:\nEvidence shows that neck pain, especially when progressing to radiculopathy or myelopathy, leads to significant impairment in daily function and quality of life. Multiple sources indicate that cervical radiculopathy and cervical myelopathy result in reduced productivity, mobility issues, and diminished ability to...",
+          "parsed_answer": "A",
+          "generation_time": 12.795757532119751
+        }
+      ]
+    }
+  }
+}

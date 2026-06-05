@@ -11,9 +11,12 @@ import re
 import time
 from pathlib import Path
 
-# Add MedRAG paths - use optimized version
-medrag_root = "/data/wang/junh/githubs/mirage_medrag/MedRAG"
-mirage_src = "/data/wang/junh/githubs/mirage_medrag/MIRAGE/src"
+# Add MedRAG paths. Override the default with env var MIRAGE_MEDRAG_ROOT
+# (e.g. /home/junh/repos/mirage_medrag on ARC).
+_DEFAULT_MIRAGE_MEDRAG_ROOT = "/data/wang/junh/githubs/mirage_medrag"
+_mirage_medrag_root = os.environ.get("MIRAGE_MEDRAG_ROOT", _DEFAULT_MIRAGE_MEDRAG_ROOT)
+medrag_root = os.path.join(_mirage_medrag_root, "MedRAG")
+mirage_src = os.path.join(_mirage_medrag_root, "MIRAGE", "src")
 
 sys.path.insert(0, medrag_root)
 sys.path.insert(0, os.path.join(medrag_root, "src"))
@@ -46,7 +49,12 @@ HF_MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
 FAISS_GPU_ID = 0  # First visible GPU (GPU 0) for FAISS index
 VLLM_GPU_ID = 1   # Second visible GPU (GPU 1) for VLLM
 
-MEDCORP_DIR = "/data/wang/junh/githubs/mirage_medrag/MedRAG/src/data/corpus"
+# Corpus dir. Override with env var MEDCORP_DIR (e.g. /scratch/junh/medrag/corpus on ARC)
+# or the --db_dir CLI flag. Default is the local-lab path.
+MEDCORP_DIR = os.environ.get(
+    "MEDCORP_DIR",
+    "/data/wang/junh/githubs/mirage_medrag/MedRAG/src/data/corpus",
+)
 
 # Retrieval parameters
 DEFAULT_K = 32
@@ -1739,7 +1747,7 @@ def debate_question(medrag, llm, qid, question, options, k, log_dir, rounds=MAX_
 # MAIN BENCHMARK RUNNER
 # ============================================================================
 
-def run_debate_benchmark(dataset_name="mmlu", k=DEFAULT_K, log_dir="./debate_logs", split="test", resume=True, corpus_name="MedCorp"):
+def run_debate_benchmark(dataset_name="mmlu", k=DEFAULT_K, log_dir="./debate_logs", split="test", resume=True, corpus_name="MedCorp", limit=None):
     """
     Run RAG debate-based evaluation on a MedQA dataset.
     
@@ -1821,7 +1829,10 @@ def run_debate_benchmark(dataset_name="mmlu", k=DEFAULT_K, log_dir="./debate_log
     processed = 0
     skipped = 0
     
-    for idx in range(len(dataset)):
+    n_questions = len(dataset) if limit is None else min(len(dataset), limit)
+    if limit is not None:
+        print(f"[LIMIT] Smoke-test mode: stopping after {n_questions} questions")
+    for idx in range(n_questions):
         qdata = dataset[idx]
         # Use dataset.index[idx] for proper ID matching with evaluate.py
         question_id = dataset.index[idx]
@@ -1979,6 +1990,10 @@ if __name__ == "__main__":
     parser.add_argument("--gpu_ids", type=str, default=None,
                        help="Comma-separated CUDA device IDs (default: from CUDA_VISIBLE_DEVICES env or '3,5'). "
                             "First ID is used for FAISS+embedding, second for VLLM.")
+    parser.add_argument("--db_dir", type=str, default=None,
+                       help=f"Path to the MedRAG corpus directory (default: {MEDCORP_DIR})")
+    parser.add_argument("--limit", type=int, default=None,
+                       help="Stop after this many questions (for smoke testing).")
 
     args = parser.parse_args()
 
@@ -1989,6 +2004,9 @@ if __name__ == "__main__":
     if args.gpu_ids:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_ids
         print(f"GPU override (--gpu_ids): CUDA_VISIBLE_DEVICES={args.gpu_ids}")
+    if args.db_dir:
+        MEDCORP_DIR = args.db_dir
+        print(f"Corpus dir override (--db_dir): {MEDCORP_DIR}")
 
     # Extract model name from HF_MODEL_NAME for directory structure
     model_name = HF_MODEL_NAME.split("/")[-1].replace("-", "_")
@@ -2010,5 +2028,6 @@ if __name__ == "__main__":
         log_dir=args.log_dir,
         split=args.split,
         resume=not args.no_resume,
-        corpus_name=args.corpus_name
+        corpus_name=args.corpus_name,
+        limit=args.limit
     )

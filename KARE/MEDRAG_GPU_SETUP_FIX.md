@@ -130,3 +130,40 @@ See these files for correct patterns:
 **The golden rule: Set CUDA_VISIBLE_DEVICES exactly ONCE inside your model class `__init__`, then NEVER touch it again.**
 
 This ensures vLLM initializes with the correct GPU mapping and never tries to re-initialize CUDA, which causes the forked subprocess error.
+
+---
+
+## Addendum (vLLM 0.11 / v1 engine) — same error, different cause
+
+If the error STILL appears even though `CUDA_VISIBLE_DEVICES` is set exactly once
+inside the model class (the rule above), the cause is different and newer:
+
+```
+RuntimeError: Cannot re-initialize CUDA in forked subprocess. ...
+  (EngineCore_DP0 pid=...)   # note: it fails in the engine-core SUBPROCESS
+```
+
+**Root cause (vLLM v1):** the v1 engine launches its `EngineCore_DP0` as a
+*subprocess*, and the default start method is **fork** (`VLLM_WORKER_MULTIPROC_METHOD`
+defaults to `"fork"` in `vllm/envs.py`). By the time `LLM(...)` runs, CUDA is already
+initialized in the parent process (vLLM/torch touch CUDA during import + platform
+detection), so forking the engine core re-initializes CUDA in a forked child → crash.
+`_maybe_force_spawn()` only auto-switches to spawn under Ray, not for a live CUDA
+context, so single-process scripts must set it themselves.
+
+**Fix:** force the spawn start method *before* vLLM is imported:
+
+```bash
+export VLLM_WORKER_MULTIPROC_METHOD=spawn      # shell, before launching the script
+```
+or, in Python, before any `from vllm import ...`:
+```python
+import os
+os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+```
+
+Applied in: `DAIH/experiments/run_condition_D_oss.py` (top of file) and
+`DAIH/experiments/run_clinical_matrix.sh` (exports it for the whole run).
+
+Alternative (if spawn causes other trouble): run the engine in-process with
+`export VLLM_ENABLE_V1_MULTIPROCESSING=0` — no subprocess, so nothing to fork.

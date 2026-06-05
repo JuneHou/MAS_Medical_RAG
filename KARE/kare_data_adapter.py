@@ -15,18 +15,23 @@ class KAREDataAdapter:
     for integration with multi-agent debate system.
     """
     
-    def __init__(self, base_path: str = "./data", split: str = "test"):
+    def __init__(self, base_path: str = "./data", split: str = "test",
+                 dataset: str = "mimic3", task: str = "mortality"):
         """
         Initialize KARE data adapter.
-        
+
         Args:
             base_path: Base path to KARE dataset directory (relative to script location)
             split: Data split to load ('train', 'val', or 'test')
+            dataset: EHR dataset ('mimic3' or 'mimic4')
+            task: Prediction task ('mortality' or 'readmission')
         """
         self.base_path = Path(base_path)
         self.ehr_data_path = self.base_path / "ehr_data"
         self.patient_context_path = self.base_path / "patient_context" / "similar_patient_qwen"
         self.split = split
+        self.dataset = dataset
+        self.task = task
         
         # Load appropriate split data
         if split == "train":
@@ -45,9 +50,9 @@ class KAREDataAdapter:
         print(f"Loaded similar patient contexts for {len(self.similar_patients)} patients")
     
     def _load_train_data(self) -> List[Dict[str, Any]]:
-        """Load MIMIC-III mortality training data."""
-        train_file = self.ehr_data_path / "mimic3_mortality_samples_train.json"
-        
+        """Load training data for the configured dataset/task."""
+        train_file = self.ehr_data_path / f"{self.dataset}_{self.task}_samples_train.json"
+
         if not train_file.exists():
             raise FileNotFoundError(f"Train data not found: {train_file}")
         
@@ -57,9 +62,9 @@ class KAREDataAdapter:
         return data
     
     def _load_val_data(self) -> List[Dict[str, Any]]:
-        """Load MIMIC-III mortality validation data."""
-        val_file = self.ehr_data_path / "mimic3_mortality_samples_val.json"
-        
+        """Load validation data for the configured dataset/task."""
+        val_file = self.ehr_data_path / f"{self.dataset}_{self.task}_samples_val.json"
+
         if not val_file.exists():
             raise FileNotFoundError(f"Val data not found: {val_file}")
         
@@ -69,9 +74,9 @@ class KAREDataAdapter:
         return data
     
     def _load_test_data(self) -> List[Dict[str, Any]]:
-        """Load MIMIC-III mortality test data."""
-        test_file = self.ehr_data_path / "mimic3_mortality_samples_test.json"
-        
+        """Load test data for the configured dataset/task."""
+        test_file = self.ehr_data_path / f"{self.dataset}_{self.task}_samples_test.json"
+
         if not test_file.exists():
             raise FileNotFoundError(f"Test data not found: {test_file}")
         
@@ -83,18 +88,25 @@ class KAREDataAdapter:
     def _load_similar_patients(self) -> Dict[str, str]:
         """Load precomputed similar patient contexts."""
         # Use improved similar patient file with better positive/negative balance (top-1)
-        similar_file = self.base_path / "patient_context" / "similar_patient_debate" / "patient_to_top_1_patient_contexts_mimic3_mortality_improved.json"
-        
-        # Fallback to original file if improved version not available
-        if not similar_file.exists():
-            similar_file = self.patient_context_path / "patient_to_top_1_patient_contexts_mimic3_mortality.json"
-            print(f"Using original similar patient file: {similar_file}")
-        else:
-            print(f"Using improved similar patient file: {similar_file}")
-        
-        if not similar_file.exists():
-            print(f"Warning: Similar patient contexts not found: {similar_file}")
+        # when available (only mimic3_mortality has the "_improved" variant); otherwise
+        # fall back to the plain top-1 file for this dataset/task.
+        stem = f"patient_to_top_1_patient_contexts_{self.dataset}_{self.task}"
+        # Prefer the "_improved" balanced variant (only mimic3_mortality has it);
+        # otherwise the plain top-1 file, which lives directly under
+        # data/similar_patient_qwen/ (NOT under patient_context/). Search known spots.
+        candidates = [
+            self.base_path / "patient_context" / "similar_patient_debate" / f"{stem}_improved.json",
+            self.base_path / "similar_patient_qwen" / f"{stem}.json",
+            self.base_path / "patient_context" / "similar_patient_qwen" / f"{stem}.json",
+            self.patient_context_path / f"{stem}.json",
+        ]
+        similar_file = next((c for c in candidates if c.exists()), None)
+
+        if similar_file is None:
+            print(f"Warning: Similar patient contexts not found for {self.dataset}_{self.task}. "
+                  f"Searched: {[str(c) for c in candidates]}")
             return {}
+        print(f"Using similar patient file: {similar_file}")
         
         with open(similar_file, 'r') as f:
             data = json.load(f)
@@ -268,10 +280,34 @@ class KAREDataAdapter:
         return [self.get_test_sample(i) for i in range(start_idx, end_idx)]
     
     def get_task_description(self) -> str:
-        """Get mortality prediction task description."""
+        """Get the prediction task description for the configured task."""
+        if self.task == "readmission":
+            return """
+Readmission Prediction Task:
+Objective: Predict if the patient will be readmitted to the hospital within 15 days of discharge based solely on conditions, procedures, and medications.
+Labels: 1 = readmission within 15 days, 0 = no readmission within 15 days
+
+Key Considerations:
+1. Conditions:
+   - Chronic diseases with high risk of exacerbation (e.g., COPD, heart failure)
+   - Conditions requiring close monitoring or frequent adjustments (e.g., diabetes)
+   - Recent acute conditions with potential for complications
+
+2. Procedures:
+   - Recent major surgeries or interventions with high complication rates
+   - Procedures that require extensive follow-up care
+   - Incomplete or partially successful procedures
+
+3. Medications:
+   - New medication regimens that may require adjustment
+   - Medications with narrow therapeutic windows or high risk of side effects
+   - Complex medication schedules that may lead to adherence issues
+
+Note: Analyze the information comprehensively to determine the likelihood of readmission. The goal is to accurately distinguish between patients who are likely to be readmitted and those who are not.
+"""
         return """
 Mortality Prediction Task:
-Objective: Predict the mortality outcome for a patient's subsequent hospital visit based solely on conditions, procedures, and medications. 
+Objective: Predict the mortality outcome for a patient's subsequent hospital visit based solely on conditions, procedures, and medications.
 Labels: 1 = mortality, 0 = survival
 
 Key Considerations:
@@ -281,7 +317,7 @@ Key Considerations:
    - Acute vs. chronic nature of conditions
 
 2. Procedures:
-   - Invasiveness and complexity of recent procedures 
+   - Invasiveness and complexity of recent procedures
    - Emergency vs. elective procedures
    - Frequency of life-sustaining procedures (e.g., dialysis, mechanical ventilation)
 

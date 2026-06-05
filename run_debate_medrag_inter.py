@@ -11,9 +11,12 @@ import re
 import time
 from pathlib import Path
 
-# Add MedRAG paths - use optimized version
-medrag_root = "/data/wang/junh/githubs/mirage_medrag/MedRAG"
-mirage_src = "/data/wang/junh/githubs/mirage_medrag/MIRAGE/src"
+# Add MedRAG paths. Override the default with env var MIRAGE_MEDRAG_ROOT
+# (e.g. /home/junh/repos/mirage_medrag on ARC).
+_DEFAULT_MIRAGE_MEDRAG_ROOT = "/data/wang/junh/githubs/mirage_medrag"
+_mirage_medrag_root = os.environ.get("MIRAGE_MEDRAG_ROOT", _DEFAULT_MIRAGE_MEDRAG_ROOT)
+medrag_root = os.path.join(_mirage_medrag_root, "MedRAG")
+mirage_src = os.path.join(_mirage_medrag_root, "MIRAGE", "src")
 
 sys.path.insert(0, medrag_root)
 sys.path.insert(0, os.path.join(medrag_root, "src"))
@@ -1851,6 +1854,8 @@ if __name__ == "__main__":
     parser.add_argument("--gpu_ids", type=str, default=None,
                        help="Comma-separated CUDA device IDs (default: from CUDA_VISIBLE_DEVICES env or '6,7'). "
                             "First ID is used for FAISS+embedding, second for VLLM.")
+    parser.add_argument("--db_dir", type=str, default=None,
+                       help=f"Path to the MedRAG corpus directory (only used in --mode rag; default: {MEDCORP_DIR})")
 
     args = parser.parse_args()
 
@@ -1861,6 +1866,9 @@ if __name__ == "__main__":
     if args.gpu_ids:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_ids
         print(f"GPU override (--gpu_ids): CUDA_VISIBLE_DEVICES={args.gpu_ids}")
+    if args.db_dir:
+        MEDCORP_DIR = args.db_dir
+        print(f"Corpus dir override (--db_dir): {MEDCORP_DIR}")
 
     # Update global rounds if specified
     MAX_ROUNDS = args.rounds
