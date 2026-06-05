@@ -396,13 +396,26 @@ def extract_probabilities(response: str) -> Dict[str, Any]:
     # number sits on the next line) that previously got mis-parsed as 1.0. Among the
     # valid same-line matches we take the LAST one, i.e. the model's final assessment
     # rather than any earlier mention.
-    def _last_same_line_prob(first_word: str):
-        pat = rf'{first_word}[ \t]+PROBABILITY[ \t:*]*([0-9]*\.?[0-9]+)'
+    def _last_same_line_prob(first_word: str, lookbehind: str = ''):
+        pat = rf'{lookbehind}{first_word}[ \t]+PROBABILITY[ \t:*]*([0-9]*\.?[0-9]+)'
         matches = re.findall(pat, response, re.IGNORECASE)
         return float(matches[-1]) if matches else None
 
+    # Positive / negative class probabilities. Mortality task emits
+    # MORTALITY / SURVIVAL; readmission task emits READMISSION / NO-READMISSION
+    # (a model may also drop the hyphen: "NO READMISSION"). The readmission tokens
+    # are tried only as a fallback, so mortality parsing is byte-identical. The
+    # positive READMISSION fallback is guarded so it does NOT match the "READMISSION"
+    # inside the negative line: (?<!NO[-\s]) rejects a preceding "NO-"/"NO " (hyphen
+    # or space variant) and (?<![\w-]) rejects it being part of a larger token.
     result['mortality_probability'] = _last_same_line_prob('MORTALITY')
+    if result['mortality_probability'] is None:
+        result['mortality_probability'] = _last_same_line_prob(
+            'READMISSION', lookbehind=r'(?<!NO[-\s])(?<![\w-])')
+
     result['survival_probability'] = _last_same_line_prob('SURVIVAL')
+    if result['survival_probability'] is None:
+        result['survival_probability'] = _last_same_line_prob(r'NO[-\s]?READMISSION')
 
     # Determine prediction
     mort_prob = result['mortality_probability']

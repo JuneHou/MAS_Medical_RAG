@@ -8,24 +8,25 @@ runners can flip between tasks without editing the KARE-side code (which keeps t
 existing GPT-4o mortality baseline byte-identical).
 
 What stays the SAME across tasks (per design decision):
-  - the integrator emits two lines, "MORTALITY PROBABILITY: X.XX" and
-    "SURVIVAL PROBABILITY: X.XX", parsed by gpt_utils.extract_probabilities and
-    binarized at 0.5. We keep that output format and parser unchanged for BOTH
-    binary tasks. For readmission these two legacy line-labels are repurposed to
-    mean the positive (readmitted) / negative (not readmitted) outcome — the
-    integrator prompt says so explicitly.
+  - the integrator emits two complementary probability lines (summing to 1.00),
+    parsed by gpt_utils.extract_probabilities and binarized at 0.5. We keep that
+    probability+threshold mechanism unchanged for BOTH binary tasks. Mortality emits
+    "MORTALITY PROBABILITY" / "SURVIVAL PROBABILITY"; readmission emits the natural
+    "READMISSION PROBABILITY" / "NO-READMISSION PROBABILITY". extract_probabilities
+    has boundary-guarded aliases so the readmission tokens map into the same two
+    fields (mortality_probability = P(positive class), survival_probability =
+    P(negative class)) — so the parser/threshold/metrics are task-agnostic.
   - the two contrastive analyst prompts (outcome-agnostic) are unchanged.
+  - the integrator WORKFLOW (compare similars -> one forced <search> -> analyze
+    risk/protective -> final assessment): the readmission prompts mirror the
+    mortality prompts structurally so both tasks reason the same reasoning-first way.
 
 What differs per task:
   - the data-file token used to locate KARE files ("mortality" / "readmission"),
   - the KARE task description (quoted verbatim from KARE/prediction/data_prepare.py),
-  - the integrator system prompts (forced-search for Cond A', no-search for Cond D'),
-    which carry the task framing.
-
-NOTE (flagged for review): the readmission integrator keeps the literal
-"MORTALITY PROBABILITY"/"SURVIVAL PROBABILITY" output lines so the parser/threshold
-are untouched. If you'd rather emit "READMISSION PROBABILITY" tokens, swap the two
-output lines here and add matching regex aliases in gpt_utils.extract_probabilities.
+  - the outcome nouns + the IMPORTANT framing line: mortality keeps KARE's biased
+    conservative "Mortality is rare ..." guideline; readmission uses KARE's neutral
+    "accurately distinguish ... readmitted ... from those who are not" framing.
 """
 
 from __future__ import annotations
@@ -75,20 +76,20 @@ Note: The two probabilities MUST sum to exactly 1.00"""
 
 
 # ---------------------------------------------------------------------------
-# READMISSION — same structure/output format, framed for 15-day readmission.
-# The two output lines are kept verbatim so the parser + 0.5 threshold are
-# unchanged; the prompt states they denote readmission / no-readmission.
+# READMISSION — structurally IDENTICAL to the MORTALITY prompts above, with only
+# outcome nouns swapped and KARE's neutral readmission framing (not the conservative
+# "rare" bias). The earlier version replaced step 4 with a verbose output-relabel
+# note ("MORTALITY PROBABILITY denotes readmission ...") which made the gpt-oss
+# integrator skip reasoning and emit a bare probability stub (14-18% reasoning vs
+# 67% on mortality -> below-chance AUC). Mirroring the mortality workflow restores
+# reasoning-first behavior (KARE is emphatically reasoning-first). The two output
+# lines use natural READMISSION / NO-READMISSION tokens; gpt_utils.extract_probabilities
+# has boundary-guarded aliases so they map to mortality_probability / survival_probability
+# and the 0.5 threshold + sum-to-1 logic are unchanged.
 # ---------------------------------------------------------------------------
-_READMISSION_OUTPUT_NOTE = """In your final assessment, report your probability that the patient WILL be readmitted within 15 days, and its complement, using these EXACT two lines (the labels are fixed output keys — here "MORTALITY PROBABILITY" denotes the readmission probability and "SURVIVAL PROBABILITY" denotes the no-readmission probability):
+READMISSION_INTEGRATOR_FORCED_SEARCH = """You are a medical AI Clinical Assistant analyzing the probability that the patient will be READMITTED to the hospital within 15 days of discharge, for the NEXT hospital visit.
 
-MORTALITY PROBABILITY: X.XX (0.00 to 1.00)   # probability of readmission within 15 days
-SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)    # probability of NO readmission within 15 days
-
-Note: The two probabilities MUST sum to exactly 1.00."""
-
-READMISSION_INTEGRATOR_FORCED_SEARCH = """You are a medical AI Clinical Assistant analyzing the probability that the patient will be READMITTED to the hospital within 15 days of discharge, based on the NEXT hospital visit.
-
-IMPORTANT: Weigh risk factors for readmission (e.g., chronic diseases prone to exacerbation, incomplete/complex procedures, complex or newly-started medication regimens) against factors favoring a stable discharge. The Target patient is the source of truth. Do not treat Similar-only items as present in the Target.
+IMPORTANT: The goal is to accurately distinguish patients who are likely to be readmitted within 15 days from those who are not. The Target patient is the source of truth. Do not treat Similar-only items as present in the Target.
 
 Available tool:
 - <search>query</search>: Retrieve medical evidence. Retrieved information will appear in <information>...</information> tags.
@@ -103,16 +104,26 @@ The query must target the target patient's most concerning clinical features (ex
 
 3) After the retrieved evidence appears inside <information>...</information>, analyze BOTH readmission-risk factors AND factors favoring a stable discharge, using both the analyst analyses and the retrieved evidence.
 
-4) """ + _READMISSION_OUTPUT_NOTE
+4) Provide your final assessment with:
 
-READMISSION_INTEGRATOR_NO_SEARCH = """You are a medical AI Clinical Assistant analyzing the probability that the patient will be READMITTED to the hospital within 15 days of discharge, based on the NEXT hospital visit.
+READMISSION PROBABILITY: X.XX (0.00 to 1.00)
+NO-READMISSION PROBABILITY: X.XX (0.00 to 1.00)
 
-IMPORTANT: Weigh risk factors for readmission (e.g., chronic diseases prone to exacerbation, incomplete/complex procedures, complex or newly-started medication regimens) against factors favoring a stable discharge. The Target patient is the source of truth. Do not treat Similar-only items as present in the Target.
+Note: The two probabilities MUST sum to exactly 1.00."""
+
+READMISSION_INTEGRATOR_NO_SEARCH = """You are a medical AI Clinical Assistant analyzing the probability that the patient will be READMITTED to the hospital within 15 days of discharge, for the NEXT hospital visit.
+
+IMPORTANT: The goal is to accurately distinguish patients who are likely to be readmitted within 15 days from those who are not. The Target patient is the source of truth. Do not treat Similar-only items as present in the Target.
 
 Workflow:
-1) Compare the Target patient to two similar cases using the two analyses, and write 3-4 key factors that determine whether the target patient is readmitted within 15 days.
+1) Compare the Target patient to two similar cases using the two analysis, and write 3-4 key factors contribute to whether the target patient is readmitted within 15 days at the next visit.
 2) If additional evidence is provided in <information>...</information> tags, analyze BOTH readmission-risk factors AND factors favoring a stable discharge.
-3) Based on the available information (analyst comparisons and any retrieved evidence), """ + _READMISSION_OUTPUT_NOTE
+3) Based on the available information (analyst comparisons and any retrieved evidence), provide your final assessment with:
+
+READMISSION PROBABILITY: X.XX (0.00 to 1.00)
+NO-READMISSION PROBABILITY: X.XX (0.00 to 1.00)
+
+Note: The two probabilities MUST sum to exactly 1.00"""
 
 
 # KARE task descriptions, quoted verbatim from KARE/prediction/data_prepare.py:17-69.
