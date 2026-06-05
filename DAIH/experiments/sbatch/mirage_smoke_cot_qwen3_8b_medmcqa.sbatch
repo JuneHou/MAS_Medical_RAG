@@ -1,19 +1,22 @@
 #!/bin/bash
-#SBATCH --job-name=mirage-01-cot-qwen3-8b-medmcqa
+#SBATCH --job-name=mirage-smoke-cot-qwen3-8b-medmcqa
 #SBATCH --account=slmreasoning
 #SBATCH --partition=a100_normal_q
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:2
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=256G
-#SBATCH --time=36:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=00:20:00
 #SBATCH -o slurm.%x.%j.out
 #SBATCH -e slurm.%x.%j.err
 
-# Cell 1 of MIRAGE gap-fill: Debate+CoT, Qwen3-8B, MedMCQA (4,183 questions).
-# Estimated wall-clock on 2 A100s: ~35 hr (resume-safe; resubmit if it times out).
-# CoT mode = no retrieval, so no MedRAG corpus needed.
+# SMOKE TEST of the CoT pipeline (cell 1: Debate+CoT, Qwen3-8B, MedMCQA).
+# Purpose: surface any remaining runtime errors FAST. Short walltime + 1 GPU + small mem
+# all backfill quickly. CoT does no retrieval (tensor_parallel_size=1, no FAISS), so 1 GPU
+# is enough. Writes to a SEPARATE log dir so it starts fresh and never touches the real
+# gap-fill logs. It will run questions until the 20-min walltime kills it (TIMEOUT is the
+# expected end state) — by then the log shows whether dataset load + the first debates work.
 
 set -euo pipefail
 
@@ -46,8 +49,8 @@ stdbuf -oL -eL python -u run_debate_medrag_inter.py \
   --mode cot \
   --dataset medmcqa \
   --model Qwen/Qwen3-8B \
-  --gpu_ids 0,1 \
-  --log_dir ./debate_logs_mirage_gapfill \
+  --gpu_ids 0 \
+  --log_dir ./debate_logs_smoke \
   --corpus_name MedCorp \
   2>&1 | tee -a "$LOG_FILE"
 

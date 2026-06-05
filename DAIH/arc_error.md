@@ -50,13 +50,24 @@ which python; $PY -c "import sys;print(sys.executable, sys.version.split()[0])" 
 Fix for the **sbatch** files (do this so batch jobs can't silently fall back to 3.13):
 in each `mirage_*.sbatch`, replace the activation block with:
 ```bash
+module load Miniconda3/24.7.1-0          # pin! see note below
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate /home/junh/envs/medrag
+export PATH="/home/junh/envs/medrag/bin:$PATH"   # belt-and-suspenders; see note below
 export PYTHONNOUSERSITE=1
 # fail fast if python isn't 3.10 from the env:
 python -c "import sys; assert sys.executable.startswith('/home/junh/envs/medrag/'), sys.executable" \
   || { echo 'WRONG PYTHON — env not active' >&2; exit 1; }
 ```
+
+**Module-default flip (2026-06):** bare `module load Miniconda3` now resolves to the new
+default **`Miniconda3/25.11.1-1`** (python 3.13). With that conda, `conda activate
+/home/junh/envs/medrag` returns 0 and sets `CONDA_PREFIX`, but **does not prepend the env
+`bin/` to PATH** — so the guard fired with `WRONG PYTHON` (base python
+`/apps/common/software/Miniconda3/25.11.1-1/bin/python`). The env was created with
+`24.7.1-0`, where activation works correctly. Fix: **pin `module load Miniconda3/24.7.1-0`**
+and add the explicit `export PATH=.../bin:$PATH` after activate as a guarantee. Both are
+applied to all 8 sbatch files.
 
 ---
 
@@ -125,6 +136,56 @@ test on a small interactive shell.
 
 ---
 
+## 6. ✅ FlashInfer sampler JIT needs nvcc (FIXED)
+
+Symptom (during vLLM V1 engine init, right after the model finishes loading):
+```
+[EngineCore] Using FlashInfer for top-p & top-k sampling.
+...
+RuntimeError: Could not find nvcc and default cuda_home='/usr/local/cuda' doesn't exist
+  (flashinfer/jit/cpp_ext.py:get_cuda_path → write_ninja → build_and_load)
+```
+Cause: vllm 0.11.0's V1 `TopKTopPSampler` defaults to **FlashInfer** for top-k/top-p
+sampling, which **JIT-compiles** a CUDA kernel on first use. The ARC compute node has no
+`nvcc` / no `/usr/local/cuda` / `CUDA_HOME` unset, so the JIT build aborts and the engine
+dies. (Attention uses the FlashAttention backend, so the sampler is the only FlashInfer JIT
+path triggered.)
+
+Fix: disable the FlashInfer sampler so vllm uses its PyTorch-native top-k/top-p path (no JIT,
+no nvcc, statistically equivalent). Added to all 8 sbatch env blocks:
+```bash
+export VLLM_USE_FLASHINFER_SAMPLER=0
+```
+vllm gates this at `vllm/v1/sample/ops/topk_topp_sampler.py` — when the var parses to `False`
+it falls back to `forward_native`. Affects every cell (CoT and RAG share the sampling path).
+
+---
+
+## 7. ✅ Hardcoded benchmark.json path in MIRAGE QADataset (FIXED)
+
+Symptom (right after vLLM init succeeds, at `Loading <dataset> dataset...`):
+```
+File ".../mirage_medrag/MIRAGE/src/utils.py", line 9, in __init__
+    benchmark = json.load(open("/data/wang/junh/githubs/mirage_medrag/MIRAGE/benchmark.json"))
+FileNotFoundError: '/data/wang/junh/githubs/mirage_medrag/MIRAGE/benchmark.json'
+```
+Cause: `QADataset.__init__` hardcoded the local-workstation path to `benchmark.json`, ignoring
+`MIRAGE_MEDRAG_ROOT`. (`run_debate_medrag_inter.py`/`_rag.py` correctly honor the env var, but
+`utils.py` did not.) The file exists on ARC at `…/mirage_medrag/MIRAGE/benchmark.json`.
+
+Fix: resolve it relative to `utils.py`'s own location (benchmark.json sits one dir up):
+```python
+benchmark = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "benchmark.json")))
+```
+Verified: `QADataset("medmcqa")` loads 4,183 questions. Affects all cells (every cell builds a
+`QADataset`).
+
+Note: `run_debate_medrag_inter.py:52` / `_rag.py:52` also hardcode `MEDCORP_DIR =
+/data/wang/...corpus`, but that is RAG-only and the RAG sbatch files override it via
+`--db_dir "$CORPUS_DIR"`, so it is not a blocker. Watch for it if running RAG without `--db_dir`.
+
+---
+
 ## 5. Run order (after #3 chunk staging is done)
 
 ```bash
@@ -158,7 +219,10 @@ MedMCQA = 4,183 questions; ~28 h wall-clock. On TIMEOUT, just re-submit — the 
 ## Checklist
 - [x] transformers 4.57.1 / tokenizers 0.22.1 in the env
 - [x] preflight check added to `_stage_corpus.sh`
-- [ ] sbatch activation hardening (#2) applied to all 8 files + re-rsync to ARC
+- [x] sbatch activation hardening (#2) applied to all 8 files (module pin + PATH prepend)
+- [x] VLLM_USE_FLASHINFER_SAMPLER=0 in all 8 sbatch (#6)
+- [x] MIRAGE benchmark.json path made relative in utils.py (#7)
+- [ ] re-rsync `DAIH/experiments/sbatch/` to ARC to pick up #2/#6 edits
 - [ ] chunk text staged to /scratch + symlinks swapped (#3)
 - [ ] cell 5 smoke test clean
 - [ ] MedMCQA cells 1,2,3,4,6 submitted

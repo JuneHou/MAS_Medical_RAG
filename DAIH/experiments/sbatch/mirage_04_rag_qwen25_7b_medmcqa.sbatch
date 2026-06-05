@@ -16,9 +16,10 @@
 
 set -euo pipefail
 
-module load Miniconda3
+module load Miniconda3/24.7.1-0
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate /home/junh/envs/medrag
+export PATH="/home/junh/envs/medrag/bin:$PATH"
 export PYTHONNOUSERSITE=1
 # fail fast if python is not 3.10 from the medrag env (avoids base python-3.13 fallback)
 python -c "import sys; assert sys.executable.startswith('/home/junh/envs/medrag/'), sys.executable" || { echo 'WRONG PYTHON: medrag env not active' >&2; exit 1; }
@@ -30,6 +31,7 @@ export SENTENCE_TRANSFORMERS_HOME=/scratch/junh/hf_cache_st
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 export PYTHONDONTWRITEBYTECODE=1
+export VLLM_USE_FLASHINFER_SAMPLER=0   # force PyTorch-native top-k/top-p; node has no nvcc for FlashInfer JIT
 
 mkdir -p "$HF_HOME"
 cd /home/junh/repos/Debate
