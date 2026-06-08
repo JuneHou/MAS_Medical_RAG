@@ -126,6 +126,58 @@ NO-READMISSION PROBABILITY: X.XX (0.00 to 1.00)
 Note: The two probabilities MUST sum to exactly 1.00"""
 
 
+# ---------------------------------------------------------------------------
+# SINGLE-AGENT (Cond H') — the debate-ablation control. One oss call reads the
+# Target patient + the SAME retrieved evidence Cond A' pulled (reused from the A'
+# logs' gpt_docs), with NO two-analyst contrastive comparison. This is the only
+# thing removed vs A': same model, same bias framing, same retrieved docs, same
+# output tokens + 0.5 threshold. So H' vs A' isolates the debate STRUCTURE.
+#
+# These are the MORTALITY_/READMISSION_INTEGRATOR_NO_SEARCH prompts with step 1's
+# "Compare the Target patient to two similar cases using the two analysis" replaced
+# by "Review the Target patient's ... directly" (no analysts exist here), and the
+# "Do not treat Similar-only items as present in the Target" debate caveat dropped
+# (no Similar items are shown). Framing (mortality bias / readmission neutral) and
+# output format are byte-identical to the integrator so the comparison is clean.
+# ---------------------------------------------------------------------------
+MORTALITY_SINGLE_AGENT = """You are a medical AI Clinical Assistant analyzing mortality and survival probabilities for the NEXT hospital visit.
+
+IMPORTANT: Mortality is rare. Only assign a high mortality probability when the patient appears at extremely high risk of death with strong evidence. The Target patient is the source of truth.
+
+Workflow:
+1) Review the Target patient's conditions, procedures, and medications, and write 3-4 key factors that contribute to the target patient's outcome at the next visit.
+2) If additional evidence is provided in <information>...</information> tags, analyze BOTH risky factors AND survival factors.
+3) Based on the available information (the patient's history and any retrieved evidence), provide your final assessment with:
+
+MORTALITY PROBABILITY: X.XX (0.00 to 1.00)
+SURVIVAL PROBABILITY: X.XX (0.00 to 1.00)
+
+Note: The two probabilities MUST sum to exactly 1.00"""
+
+READMISSION_SINGLE_AGENT = """You are a medical AI Clinical Assistant analyzing the probability that the patient will be READMITTED to the hospital within 15 days of discharge, for the NEXT hospital visit.
+
+IMPORTANT: The goal is to accurately distinguish patients who are likely to be readmitted within 15 days from those who are not. The Target patient is the source of truth.
+
+Workflow:
+1) Review the Target patient's conditions, procedures, and medications, and write 3-4 key factors that contribute to whether the target patient is readmitted within 15 days at the next visit.
+2) If additional evidence is provided in <information>...</information> tags, analyze BOTH readmission-risk factors AND factors favoring a stable discharge.
+3) Based on the available information (the patient's history and any retrieved evidence), provide your final assessment with:
+
+READMISSION PROBABILITY: X.XX (0.00 to 1.00)
+NO-READMISSION PROBABILITY: X.XX (0.00 to 1.00)
+
+Note: The two probabilities MUST sum to exactly 1.00"""
+
+
+# Positive / negative probability line labels per task (used by Cond H' to re-state
+# the required output format after the retrieved evidence). They match the tokens
+# the prompts emit and that gpt_utils.extract_probabilities parses.
+PROB_LINES = {
+    "mortality": ("MORTALITY PROBABILITY", "SURVIVAL PROBABILITY"),
+    "readmission": ("READMISSION PROBABILITY", "NO-READMISSION PROBABILITY"),
+}
+
+
 # KARE task descriptions, quoted verbatim from KARE/prediction/data_prepare.py:17-69.
 MORTALITY_TASK_DESCRIPTION = """
 Mortality Prediction Task:
@@ -182,12 +234,14 @@ TASKS = {
         "task_description": MORTALITY_TASK_DESCRIPTION,
         "integrator_forced_search": MORTALITY_INTEGRATOR_FORCED_SEARCH,
         "integrator_no_search": MORTALITY_INTEGRATOR_NO_SEARCH,
+        "single_agent": MORTALITY_SINGLE_AGENT,
     },
     "readmission": {
         "data_token": "readmission",
         "task_description": READMISSION_TASK_DESCRIPTION,
         "integrator_forced_search": READMISSION_INTEGRATOR_FORCED_SEARCH,
         "integrator_no_search": READMISSION_INTEGRATOR_NO_SEARCH,
+        "single_agent": READMISSION_SINGLE_AGENT,
     },
 }
 
