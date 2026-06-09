@@ -1,0 +1,159 @@
+{
+  "qid": "test_0099",
+  "question": "A 43-year-old man with a history of schizophrenia, currently controlled with medication, comes in for an appointment with his internist. He is concerned about abnormal discharge from both nipples over the past 3 months. The fluid is white, and he wonders if it could be milk. On further review of systems, he endorses a diminished sexual drive. The physician suspects that one of the patient's medications may be the culprit for these symptoms. Which of the following medications is NOT likely to be the cause?",
+  "options": {
+    "A": "Haloperidol",
+    "B": "Bromocriptine",
+    "C": "Fluphenazine",
+    "D": "Risperidone"
+  },
+  "mode": "rag",
+  "rounds": 2,
+  "history": [
+    {
+      "role": "agent1",
+      "round": 1,
+      "message": "Agent1 Round 1: \\boxed{B}\n**Clinical Reasoning:**\nSeveral antipsychotics, particularly first- and second-generation ones, are known to cause hyperprolactinemia, leading to galactorrhea and reduced libido. Typical and atypical antipsychotics like haloperidol, fluphenazine, and risperidone block dopaminergic pathways in the hypothalamus, increasing prolactin secretion. In contrast, bromocriptine is a **dopamine agonist**, not an inhibitor—it directly suppresses prolactin by stimulating dopamine receptors and is used specifically to treat hyperprolactinemia. Thus, it would *not* cause galactorrhea and instead counteracts it.\nAnswer: B",
+      "answer": {
+        "step_by_step_thinking": "\\boxed{B}\n**Clinical Reasoning:**\nSeveral antipsychotics, particularly first- and second-generation ones, are known to cause hyperprolactinemia, leading to galactorrhea and reduced libido. Typical and atypical antipsychotics like haloperidol, fluphenazine, and risperidone block dopaminergic pathways in the hypothalamus, increasing prolactin secretion. In contrast, bromocriptine is a **dopamine agonist**, not an inhibitor—it directly suppresses prolactin by stimulating dopamine receptors and is used specifically to treat hyperprolactinemia. Thus, it would *not* cause galactorrhea and instead counteracts it.",
+        "answer_choice": "B",
+        "raw_response": "\\boxed{B}\n**Clinical Reasoning:**\nSeveral antipsychotics, particularly first- and second-generation ones, are known to cause hyperprolactinemia, leading to galactorrhea and reduced libido. Typical and atypical antipsychotics like haloperidol, fluphenazine, and risperidone block dopaminergic pathways in the hypothalamus, increasing prolactin secretion. In contrast, bromocriptine is a **dopamine agonist**, not an inhibitor—it directly suppresses prolactin by stimulating dopamine receptors and is used specifically to treat hyperprolactinemia. Thus, it would *not* cause galactorrhea and instead counteracts it.\n\\boxed{B}",
+        "generation_time": 3.302521228790283,
+        "retrieval_time": 0.0,
+        "total_time": 3.3025970458984375,
+        "mode": "rag_with_predocs",
+        "retrieved_docs": 32
+      }
+    },
+    {
+      "role": "agent2",
+      "round": 1,
+      "message": "Agent2 Round 1: \\boxed{B}\n**Clinical Reasoning:**\nThe patient presents with galactorrhea (abnormal nipple discharge) and decreased libido, which are classic side effects of dopamine-blocking medications, especially those affecting prolactin regulation. Most antipsychotics listed — haloperidol, fluphenazine, and risperidone — are dopamine D2 blockers that increase prolactin secretion, leading to galactorrhea and hypogonadism. Bromocriptine, however, is a **dopamine agonist**, specifically stimulating dopamine receptors (particularly D2), which lowers prolactin levels and thus would *not* cause elevated prolactin-related symptoms. Therefore, bromocriptine is unlikely to be responsible for these findings.\nAnswer: B",
+      "answer": {
+        "step_by_step_thinking": "\\boxed{B}\n**Clinical Reasoning:**\nThe patient presents with galactorrhea (abnormal nipple discharge) and decreased libido, which are classic side effects of dopamine-blocking medications, especially those affecting prolactin regulation. Most antipsychotics listed — haloperidol, fluphenazine, and risperidone — are dopamine D2 blockers that increase prolactin secretion, leading to galactorrhea and hypogonadism. Bromocriptine, however, is a **dopamine agonist**, specifically stimulating dopamine receptors (particularly D2), which lowers prolactin levels and thus would *not* cause elevated prolactin-related symptoms. Therefore, bromocriptine is unlikely to be responsible for these findings.",
+        "answer_choice": "B",
+        "raw_response": "\\boxed{B}\n**Clinical Reasoning:**\nThe patient presents with galactorrhea (abnormal nipple discharge) and decreased libido, which are classic side effects of dopamine-blocking medications, especially those affecting prolactin regulation. Most antipsychotics listed — haloperidol, fluphenazine, and risperidone — are dopamine D2 blockers that increase prolactin secretion, leading to galactorrhea and hypogonadism. Bromocriptine, however, is a **dopamine agonist**, specifically stimulating dopamine receptors (particularly D2), which lowers prolactin levels and thus would *not* cause elevated prolactin-related symptoms. Therefore, bromocriptine is unlikely to be responsible for these findings.\n\\boxed{B}",
+        "generation_time": 3.3350656032562256,
+        "retrieval_time": 0.0,
+        "total_time": 3.3351497650146484,
+        "mode": "rag_with_predocs",
+        "retrieved_docs": 32
+      }
+    },
+    {
+      "role": "agent1",
+      "round": 2,
+      "message": "Agent1 Round 2: Tool Call: retrieve(\"effect of bromocriptine on prolactin levels\")\n\nRetrieved Documents: 32 documents\n\nFirst, state whether you agree or disagree with the prior conclusion (with one new reason).\nThen give your final answer choice in boxed notation.\nBased on the retrieved evidence, the prior conclusion—that **bromocriptine is unlikely to be the cause** of galactorrhea—is correct. Bromocriptine is actually indicated *specifically* for treating hyperprolactinemia and galactorrhea by decreasing prolactin levels via dopamine D2 receptor agonism. Thus, unlike the other antipsychotics listed—which block dopamine receptors and lead to prolactin elevation—it would *not* cause the patient's symptoms. Even though bromocriptine is used off-label for managing galactorrhea caused by antipsychotics, its primary action is to reverse it. Therefore, it cannot be responsible for initiating galactorrhea.\n\\boxed{B} You said: Answer choice: B\nI agree with the prior conclusion. New supporting evidence shows that bromocriptine actively treats hyperprolactinemia and galactorrhea by blocking prolactin release via dopamine D2 agonism, making it incapable of causing the symptoms described. Other antipsychotics (haloperidol, fluphenazine, risperidone) work by blocking dopamine D2 receptors, leading to increased prolactin and subsequent galactorrhea. Hence, bromocriptine is definitively not responsible.\n\\boxed{B}\nRationale: All antipsychotics except bromocriptine act by blocking dopamine D2 receptors, elevating prolactin and contributing to galactorrhea. Bromocriptine, as a dopamine agonist, lowers prolactin and is therapeutically used to treat hyperprolactinemia and persistent galactorrhea—an indication contrary to causing it.\n\\boxed{B}\nFinal Answer:\\boxed{B} We are analyzing which medication is NOT likely to be the cause of galactorrhea in a 43-year-old man with schizophrenia who now presents with nipple discharge and decreased libido.\nKey background:\n- Galactorrhea (milk-like discharge from breasts) is often due to elevated prolactin levels.\n- Elevated prolactin occurs when dopamine D2 receptors in the pituitary are blocked → loss of tonic inhibition on lactotrophs → ↑ prolactin.\n- Antipsychotics (especially first-gen and some second-gen) block dopamine D2 receptors → ↑ prolactin → galactorrhea & sexual dysfunction.\n- Bromocriptine works as a **dopamine D2 agonist**, mimicking dopamine → ↓ prolactin → treats hyperprolactinemia/galactorrhea.\nEvidence retrieved confirms:\n- Bromocriptine decreases prolactin by activating D2 receptors on lactotrophs (source: [14], [16]).\n- It is specifically approved/off-label for treating hyperprolactinemia and galactorrhea ([4], [10]) — i.e., it reverses these symptoms.\n- Conversely, antipsychotics like haloperidol, fluphenazine, and risperidone block D2 receptors → increase prolactin → cause galactorrhea ([5],[14]).\nTherefore:\n- Bromocriptine would not cause the patient’s symptoms — instead, it treats them.\n- The question asks: \"Which medication is NOT likely to be the cause?\"\n→ So we’re looking for the one that doesn’t trigger galactorrhea.\nConclusion:\nYes, I agree with the prior conclusion. One strong new reason: bromocriptine is designed to *reduce*, not increase, prolactin levels and is clinically used to treat galactorrhea itself.\nAnswer:\nAnswer: B",
+      "answer": {
+        "step_by_step_thinking": "Tool Call: retrieve(\"effect of bromocriptine on prolactin levels\")\n\nRetrieved Documents: 32 documents\n\nFirst, state whether you agree or disagree with the prior conclusion (with one new reason).\nThen give your final answer choice in boxed notation.\nBased on the retrieved evidence, the prior conclusion—that **bromocriptine is unlikely to be the cause** of galactorrhea—is correct. Bromocriptine is actually indicated *specifically* for treating hyperprolactinemia and galactorrhea by decreasing prolactin levels via dopamine D2 receptor agonism. Thus, unlike the other antipsychotics listed—which block dopamine receptors and lead to prolactin elevation—it would *not* cause the patient's symptoms. Even though bromocriptine is used off-label for managing galactorrhea caused by antipsychotics, its primary action is to reverse it. Therefore, it cannot be responsible for initiating galactorrhea.\n\\boxed{B} You said: Answer choice: B\nI agree with the prior conclusion. New supporting evidence shows that bromocriptine actively treats hyperprolactinemia and galactorrhea by blocking prolactin release via dopamine D2 agonism, making it incapable of causing the symptoms described. Other antipsychotics (haloperidol, fluphenazine, risperidone) work by blocking dopamine D2 receptors, leading to increased prolactin and subsequent galactorrhea. Hence, bromocriptine is definitively not responsible.\n\\boxed{B}\nRationale: All antipsychotics except bromocriptine act by blocking dopamine D2 receptors, elevating prolactin and contributing to galactorrhea. Bromocriptine, as a dopamine agonist, lowers prolactin and is therapeutically used to treat hyperprolactinemia and persistent galactorrhea—an indication contrary to causing it.\n\\boxed{B}\nFinal Answer:\\boxed{B} We are analyzing which medication is NOT likely to be the cause of galactorrhea in a 43-year-old man with schizophrenia who now presents with nipple discharge and decreased libido.\nKey background:\n- Galactorrhea (milk-like discharge from breasts) is often due to elevated prolactin levels.\n- Elevated prolactin occurs when dopamine D2 receptors in the pituitary are blocked → loss of tonic inhibition on lactotrophs → ↑ prolactin.\n- Antipsychotics (especially first-gen and some second-gen) block dopamine D2 receptors → ↑ prolactin → galactorrhea & sexual dysfunction.\n- Bromocriptine works as a **dopamine D2 agonist**, mimicking dopamine → ↓ prolactin → treats hyperprolactinemia/galactorrhea.\nEvidence retrieved confirms:\n- Bromocriptine decreases prolactin by activating D2 receptors on lactotrophs (source: [14], [16]).\n- It is specifically approved/off-label for treating hyperprolactinemia and galactorrhea ([4], [10]) — i.e., it reverses these symptoms.\n- Conversely, antipsychotics like haloperidol, fluphenazine, and risperidone block D2 receptors → increase prolactin → cause galactorrhea ([5],[14]).\nTherefore:\n- Bromocriptine would not cause the patient’s symptoms — instead, it treats them.\n- The question asks: \"Which medication is NOT likely to be the cause?\"\n→ So we’re looking for the one that doesn’t trigger galactorrhea.\nConclusion:\nYes, I agree with the prior conclusion. One strong new reason: bromocriptine is designed to *reduce*, not increase, prolactin levels and is clinically used to treat galactorrhea itself.\nAnswer:",
+        "answer_choice": "B",
+        "raw_response": "Tool Call: retrieve(\"effect of bromocriptine on prolactin levels\")\n\nRetrieved Documents: 32 documents\n\nFirst, state whether you agree or disagree with the prior conclusion (with one new reason).\nThen give your final answer choice in boxed notation.\nBased on the retrieved evidence, the prior conclusion—that **bromocriptine is unlikely to be the cause** of galactorrhea—is correct. Bromocriptine is actually indicated *specifically* for treating hyperprolactinemia and galactorrhea by decreasing prolactin levels via dopamine D2 receptor agonism. Thus, unlike the other antipsychotics listed—which block dopamine receptors and lead to prolactin elevation—it would *not* cause the patient's symptoms. Even though bromocriptine is used off-label for managing galactorrhea caused by antipsychotics, its primary action is to reverse it. Therefore, it cannot be responsible for initiating galactorrhea.\n\\boxed{B} You said: Answer choice: B\nI agree with the prior conclusion. New supporting evidence shows that bromocriptine actively treats hyperprolactinemia and galactorrhea by blocking prolactin release via dopamine D2 agonism, making it incapable of causing the symptoms described. Other antipsychotics (haloperidol, fluphenazine, risperidone) work by blocking dopamine D2 receptors, leading to increased prolactin and subsequent galactorrhea. Hence, bromocriptine is definitively not responsible.\n\\boxed{B}\nRationale: All antipsychotics except bromocriptine act by blocking dopamine D2 receptors, elevating prolactin and contributing to galactorrhea. Bromocriptine, as a dopamine agonist, lowers prolactin and is therapeutically used to treat hyperprolactinemia and persistent galactorrhea—an indication contrary to causing it.\n\\boxed{B}\nFinal Answer:\\boxed{B} We are analyzing which medication is NOT likely to be the cause of galactorrhea in a 43-year-old man with schizophrenia who now presents with nipple discharge and decreased libido.\nKey background:\n- Galactorrhea (milk-like discharge from breasts) is often due to elevated prolactin levels.\n- Elevated prolactin occurs when dopamine D2 receptors in the pituitary are blocked → loss of tonic inhibition on lactotrophs → ↑ prolactin.\n- Antipsychotics (especially first-gen and some second-gen) block dopamine D2 receptors → ↑ prolactin → galactorrhea & sexual dysfunction.\n- Bromocriptine works as a **dopamine D2 agonist**, mimicking dopamine → ↓ prolactin → treats hyperprolactinemia/galactorrhea.\nEvidence retrieved confirms:\n- Bromocriptine decreases prolactin by activating D2 receptors on lactotrophs (source: [14], [16]).\n- It is specifically approved/off-label for treating hyperprolactinemia and galactorrhea ([4], [10]) — i.e., it reverses these symptoms.\n- Conversely, antipsychotics like haloperidol, fluphenazine, and risperidone block D2 receptors → increase prolactin → cause galactorrhea ([5],[14]).\nTherefore:\n- Bromocriptine would not cause the patient’s symptoms — instead, it treats them.\n- The question asks: \"Which medication is NOT likely to be the cause?\"\n→ So we’re looking for the one that doesn’t trigger galactorrhea.\nConclusion:\nYes, I agree with the prior conclusion. One strong new reason: bromocriptine is designed to *reduce*, not increase, prolactin levels and is clinically used to treat galactorrhea itself.\nAnswer: \\boxed{B}\n---\nNote: Despite being a psychiatric medication in some uses (e.g., for Parkinson’s), bromocriptine's mechanism stands apart from others in this list. Its role in treating hyperprolactinemic causes solidifies its distinction.\nFinal Output:",
+        "generation_time": 17.953842401504517,
+        "retrieval_time": 13.808005094528198,
+        "total_time": 31.762157201766968,
+        "mode": "rag_with_tools",
+        "retrieved_docs": 32
+      }
+    },
+    {
+      "role": "agent2",
+      "round": 2,
+      "message": "Agent2 Round 2: Tool Call: retrieve(\"effect of bromocriptine on prolactin levels\")\n\nRetrieved Documents: 32 documents\n\nAfter retrieving updated evidence on bromocriptine's effects, I confirm that bromocriptine is indeed a dopamine D2 agonist that actively **suppresses** prolactin secretion by binding to D2 receptors on lactotrophs in the anterior pituitary. This stands in stark opposition to antipsychotics like haloperidol, fluphenazine, and risperidone—which block dopamine D2 receptors and lead to disinhibition of prolactin release, thereby causing hyperprolactinemia and galactorrhea. Therefore, bromocriptine would *not* cause the patient’s nipple discharge; instead, it is used therapeutically to treat exactly this condition. Thus, contrary to the question's premise (\"which medication is NOT likely to be the cause\"), bromocriptine actually represents the correct answer since it does not produce galactorrhea—it treats it. All others listed (haloperidol, fluphenazine, risperidone) are known to elevate prolactin and hence are plausible causes. My prior agreement remains valid, strengthened now by explicit mechanistic support showing bromocriptine lowers rather than raises prolactin.\n\\boxed{B}\nI reviewed the previous discussion and confirmed my alignment with earlier conclusions. Based on newly retrieved evidence confirming bromocriptine's role as a dopamine agonist that suppresses prolactin, I reaffirm that it is not responsible for galactorrhea. Instead, it is used to treat hyperprolactinemia induced by antipsychotics. Antipsychotics such as haloperidol, fluphenazine, and risperidone block dopamine D2 receptors, elevating prolactin and causing galactorrhea. Bromocriptine opposes this mechanism entirely. Therefore, the medication that is NOT likely to be the cause of the patient's symptoms is bromocriptine.\nAnswer: B",
+      "answer": {
+        "step_by_step_thinking": "Tool Call: retrieve(\"effect of bromocriptine on prolactin levels\")\n\nRetrieved Documents: 32 documents\n\nAfter retrieving updated evidence on bromocriptine's effects, I confirm that bromocriptine is indeed a dopamine D2 agonist that actively **suppresses** prolactin secretion by binding to D2 receptors on lactotrophs in the anterior pituitary. This stands in stark opposition to antipsychotics like haloperidol, fluphenazine, and risperidone—which block dopamine D2 receptors and lead to disinhibition of prolactin release, thereby causing hyperprolactinemia and galactorrhea. Therefore, bromocriptine would *not* cause the patient’s nipple discharge; instead, it is used therapeutically to treat exactly this condition. Thus, contrary to the question's premise (\"which medication is NOT likely to be the cause\"), bromocriptine actually represents the correct answer since it does not produce galactorrhea—it treats it. All others listed (haloperidol, fluphenazine, risperidone) are known to elevate prolactin and hence are plausible causes. My prior agreement remains valid, strengthened now by explicit mechanistic support showing bromocriptine lowers rather than raises prolactin.\n\\boxed{B}\nI reviewed the previous discussion and confirmed my alignment with earlier conclusions. Based on newly retrieved evidence confirming bromocriptine's role as a dopamine agonist that suppresses prolactin, I reaffirm that it is not responsible for galactorrhea. Instead, it is used to treat hyperprolactinemia induced by antipsychotics. Antipsychotics such as haloperidol, fluphenazine, and risperidone block dopamine D2 receptors, elevating prolactin and causing galactorrhea. Bromocriptine opposes this mechanism entirely. Therefore, the medication that is NOT likely to be the cause of the patient's symptoms is bromocriptine.",
+        "answer_choice": "B",
+        "raw_response": "Tool Call: retrieve(\"effect of bromocriptine on prolactin levels\")\n\nRetrieved Documents: 32 documents\n\nAfter retrieving updated evidence on bromocriptine's effects, I confirm that bromocriptine is indeed a dopamine D2 agonist that actively **suppresses** prolactin secretion by binding to D2 receptors on lactotrophs in the anterior pituitary. This stands in stark opposition to antipsychotics like haloperidol, fluphenazine, and risperidone—which block dopamine D2 receptors and lead to disinhibition of prolactin release, thereby causing hyperprolactinemia and galactorrhea. Therefore, bromocriptine would *not* cause the patient’s nipple discharge; instead, it is used therapeutically to treat exactly this condition. Thus, contrary to the question's premise (\"which medication is NOT likely to be the cause\"), bromocriptine actually represents the correct answer since it does not produce galactorrhea—it treats it. All others listed (haloperidol, fluphenazine, risperidone) are known to elevate prolactin and hence are plausible causes. My prior agreement remains valid, strengthened now by explicit mechanistic support showing bromocriptine lowers rather than raises prolactin.\n\\boxed{B}\nI reviewed the previous discussion and confirmed my alignment with earlier conclusions. Based on newly retrieved evidence confirming bromocriptine's role as a dopamine agonist that suppresses prolactin, I reaffirm that it is not responsible for galactorrhea. Instead, it is used to treat hyperprolactinemia induced by antipsychotics. Antipsychotics such as haloperidol, fluphenazine, and risperidone block dopamine D2 receptors, elevating prolactin and causing galactorrhea. Bromocriptine opposes this mechanism entirely. Therefore, the medication that is NOT likely to be the cause of the patient's symptoms is bromocriptine.\n\\boxed{B}",
+        "generation_time": 12.42146897315979,
+        "retrieval_time": 13.74480128288269,
+        "total_time": 26.166502475738525,
+        "mode": "rag_with_tools",
+        "retrieved_docs": 32
+      }
+    }
+  ],
+  "final_answer": {
+    "step_by_step_thinking": "Consensus reached: Both Agent1 and Agent2 agree on B.",
+    "answer_choice": "B",
+    "consensus_type": "direct_agreement",
+    "total_verification_time": 0.004649162292480469,
+    "total_debate_time": 131.93383836746216
+  },
+  "timing_summary": {
+    "total_debate_time": 131.93383836746216,
+    "agent1_times": [
+      {
+        "round": 1,
+        "generation_time": 3.302521228790283,
+        "retrieval_time": 0.0,
+        "total_time": 3.3025970458984375
+      },
+      {
+        "round": 2,
+        "generation_time": 17.953842401504517,
+        "retrieval_time": 13.808005094528198,
+        "total_time": 31.762157201766968
+      }
+    ],
+    "agent2_times": [
+      {
+        "round": 1,
+        "generation_time": 3.3350656032562256,
+        "retrieval_time": 0.0,
+        "total_time": 3.3351497650146484
+      },
+      {
+        "round": 2,
+        "generation_time": 12.42146897315979,
+        "retrieval_time": 13.74480128288269,
+        "total_time": 26.166502475738525
+      }
+    ],
+    "retrieval_times": [],
+    "verification_time": 0.004649162292480469
+  },
+  "debug_info": {
+    "total_history_entries": 4,
+    "roles_participated": [
+      "agent1",
+      "agent2"
+    ],
+    "rounds_completed": [
+      1,
+      2
+    ],
+    "raw_responses_preview": {
+      "agent1": [
+        {
+          "round": 1,
+          "raw_response_length": 623,
+          "raw_response_preview": "\\boxed{B}\n**Clinical Reasoning:**\nSeveral antipsychotics, particularly first- and second-generation ones, are known to cause hyperprolactinemia, leading to galactorrhea and reduced libido. Typical and atypical antipsychotics like haloperidol, fluphenazine, and risperidone block dopaminergic pathways in the hypothalamus, increasing prolactin secretion. In contrast, bromocriptine is a **dopamine agonist**, not an inhibitor—it directly suppresses prolactin by stimulating dopamine receptors and is u...",
+          "parsed_answer": "B",
+          "generation_time": 3.302521228790283
+        },
+        {
+          "round": 2,
+          "raw_response_length": 3560,
+          "raw_response_preview": "Tool Call: retrieve(\"effect of bromocriptine on prolactin levels\")\n\nRetrieved Documents: 32 documents\n\nFirst, state whether you agree or disagree with the prior conclusion (with one new reason).\nThen give your final answer choice in boxed notation.\nBased on the retrieved evidence, the prior conclusion—that **bromocriptine is unlikely to be the cause** of galactorrhea—is correct. Bromocriptine is actually indicated *specifically* for treating hyperprolactinemia and galactorrhea by decreasing prol...",
+          "parsed_answer": "B",
+          "generation_time": 17.953842401504517
+        }
+      ],
+      "agent2": [
+        {
+          "round": 1,
+          "raw_response_length": 705,
+          "raw_response_preview": "\\boxed{B}\n**Clinical Reasoning:**\nThe patient presents with galactorrhea (abnormal nipple discharge) and decreased libido, which are classic side effects of dopamine-blocking medications, especially those affecting prolactin regulation. Most antipsychotics listed — haloperidol, fluphenazine, and risperidone — are dopamine D2 blockers that increase prolactin secretion, leading to galactorrhea and hypogonadism. Bromocriptine, however, is a **dopamine agonist**, specifically stimulating dopamine re...",
+          "parsed_answer": "B",
+          "generation_time": 3.3350656032562256
+        },
+        {
+          "round": 2,
+          "raw_response_length": 1830,
+          "raw_response_preview": "Tool Call: retrieve(\"effect of bromocriptine on prolactin levels\")\n\nRetrieved Documents: 32 documents\n\nAfter retrieving updated evidence on bromocriptine's effects, I confirm that bromocriptine is indeed a dopamine D2 agonist that actively **suppresses** prolactin secretion by binding to D2 receptors on lactotrophs in the anterior pituitary. This stands in stark opposition to antipsychotics like haloperidol, fluphenazine, and risperidone—which block dopamine D2 receptors and lead to disinhibitio...",
+          "parsed_answer": "B",
+          "generation_time": 12.42146897315979
+        }
+      ]
+    }
+  }
+}

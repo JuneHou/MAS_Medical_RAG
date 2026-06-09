@@ -1,0 +1,14 @@
+Model: Qwen/Qwen2.5-7B-Instruct
+Question ID: dev_369a3802-c030-4528-81a8-069b7d890c7e
+Response Length: 270
+==================================================
+```python
+retrieve("Jean Piaget's sensorimotor stage and object permanence")
+```
+```python
+import json
+response = retrieve("Jean Piaget's sensorimotor stage and object permanence")
+data = json.loads(response)
+print(data[:50])  # Print first 50 characters for preview
+```
+==================================================

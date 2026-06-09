@@ -47,7 +47,7 @@ stdbuf -oL -eL python -u run_debate_medrag_inter.py \
   --dataset medmcqa \
   --model Qwen/Qwen2.5-7B-Instruct \
   --gpu_ids 0,1 \
-  --log_dir ./debate_logs_mirage_gapfill \
+  --log_dir ./debate_logs_mirage_gapfill/cot_medmcqa_Qwen2.5_7B_Instruct \
   --corpus_name MedCorp \
   2>&1 | tee -a "$LOG_FILE"
 

@@ -1721,27 +1721,29 @@ def run_debate_benchmark(dataset_name="mmlu", mode="cot", k=DEFAULT_K, log_dir="
             print(f"WARNING: Question {qid_for_file} has no gold answer, skipping")
             continue
         
-        # Skip if already processed (resume capability)
-        result_file = f"{log_dir}/{qid_for_file}.json"
+        # Skip if already processed (resume capability).
+        # NOTE: the per-question result is saved as "{qid}__complete_debate.json"
+        # (see debate_question), so the resume check must look for that exact file.
+        result_file = f"{log_dir}/{qid_for_file}__complete_debate.json"
         if os.path.exists(result_file):
             print(f"Skipping {qid_for_file} (already exists)")
             # Load existing result to count accuracy
             try:
                 with open(result_file, 'r') as f:
                     existing = json.load(f)
-                    if isinstance(existing, list) and len(existing) > 0:
-                        predicted = existing[0].get("answer_choice")
-                        is_correct = (predicted == gold_answer) if predicted in ["A", "B", "C", "D"] else False
-                        if is_correct:
-                            correct += 1
-                        results.append({
-                            "id": qid_for_file,
-                            "question": question,
-                            "gold": gold_answer,
-                            "predicted": predicted,
-                            "correct": is_correct,
-                            "reasoning": existing[0].get("step_by_step_thinking", "")
-                        })
+                    final_answer = existing.get("final_answer", {}) if isinstance(existing, dict) else {}
+                    predicted = final_answer.get("answer_choice")
+                    is_correct = (predicted == gold_answer) if predicted in ["A", "B", "C", "D"] else False
+                    if is_correct:
+                        correct += 1
+                    results.append({
+                        "id": qid_for_file,
+                        "question": question,
+                        "gold": gold_answer,
+                        "predicted": predicted,
+                        "correct": is_correct,
+                        "reasoning": final_answer.get("step_by_step_thinking", "")
+                    })
             except Exception as e:
                 print(f"  Warning: Could not load existing result: {e}")
             continue
